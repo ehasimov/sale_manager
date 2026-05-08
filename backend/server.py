@@ -117,7 +117,7 @@ class CustomerOut(BaseModel):
 
 
 class ScheduleRequest(BaseModel):
-    visits_per_week: int = Field(ge=0, le=14)
+    visits_per_week: int = Field(ge=0, le=7)
 
 
 class ConfirmLocationRequest(BaseModel):
