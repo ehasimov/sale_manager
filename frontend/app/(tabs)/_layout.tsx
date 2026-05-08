@@ -19,24 +19,26 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: C.yellow,
-        tabBarInactiveTintColor: "#A1A1AA",
+        tabBarActiveTintColor: C.primary,
+        tabBarInactiveTintColor: C.textMuted,
         tabBarStyle: {
-          backgroundColor: "#0A0A0A",
-          borderTopWidth: 2,
-          borderTopColor: "#fff",
-          height: 68,
-          paddingBottom: 10,
-          paddingTop: 8,
+          backgroundColor: "rgba(255,255,255,0.96)",
+          borderTopWidth: 1,
+          borderTopColor: C.borderSoft,
+          height: 74,
+          paddingBottom: 14,
+          paddingTop: 10,
         },
-        tabBarLabelStyle: { fontSize: 10, fontWeight: "900", letterSpacing: 1.5, textTransform: "uppercase" },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: "700", letterSpacing: 0.2 },
       }}
     >
       <Tabs.Screen
         name="customers"
         options={{
           title: "Routes",
-          tabBarIcon: ({ color, size }) => <Ionicons name="storefront" size={size} color={color} />,
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? "storefront" : "storefront-outline"} size={size} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
@@ -44,14 +46,18 @@ export default function TabsLayout() {
         options={{
           title: "Admin",
           href: user.role === "admin" ? undefined : null,
-          tabBarIcon: ({ color, size }) => <Ionicons name="shield-checkmark" size={size} color={color} />,
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? "shield-checkmark" : "shield-checkmark-outline"} size={size} color={color} />
+          ),
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
           title: "Profile",
-          tabBarIcon: ({ color, size }) => <Ionicons name="person-circle" size={size} color={color} />,
+          tabBarIcon: ({ color, size, focused }) => (
+            <Ionicons name={focused ? "person-circle" : "person-circle-outline"} size={size} color={color} />
+          ),
         }}
       />
     </Tabs>

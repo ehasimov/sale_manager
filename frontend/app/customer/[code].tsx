@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -9,14 +9,17 @@ import {
   Image,
   ImageBackground,
   Dimensions,
+  Animated,
+  Easing,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { api, useAuth } from "../../src/auth";
-import { S, C, statusStyle } from "../../src/theme";
+import { S, C, statusStyle, statusTextColor } from "../../src/theme";
 import { shelfFor } from "../../src/assets";
+import * as h from "../../src/haptics";
 
 type Customer = {
   id: string;
@@ -49,9 +52,7 @@ const haversine = (a: { lat: number; lon: number }, b: { lat: number; lon: numbe
   const dLon = (b.lon - a.lon) * Math.PI / 180;
   const lat1 = a.lat * Math.PI / 180;
   const lat2 = b.lat * Math.PI / 180;
-  const x =
-    Math.sin(dLat / 2) ** 2 +
-    Math.sin(dLon / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
+  const x = Math.sin(dLat / 2) ** 2 + Math.sin(dLon / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
   return 2 * R * Math.asin(Math.sqrt(x));
 };
 
@@ -59,50 +60,96 @@ const SCREEN_W = Dimensions.get("window").width;
 const PHOTO_W = (SCREEN_W - 16 * 2 - 8) / 2;
 
 function DistanceGauge({ distance }: { distance: number | null }) {
+  const pulse = useRef(new Animated.Value(0)).current;
+  const inRange = distance != null && distance <= RADIUS;
+
+  useEffect(() => {
+    if (inRange) {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: true, easing: Easing.out(Easing.quad) }),
+          Animated.timing(pulse, { toValue: 0, duration: 900, useNativeDriver: true, easing: Easing.in(Easing.quad) }),
+        ])
+      );
+      loop.start();
+      return () => loop.stop();
+    } else {
+      pulse.setValue(0);
+    }
+  }, [inRange, pulse]);
+
   if (distance == null) {
     return (
-      <View style={{ alignItems: "center", padding: 18, borderWidth: 2, borderColor: C.border, backgroundColor: C.bgSubtle }}>
-        <Text style={{ fontFamily: "Courier", fontSize: 12, color: C.textSecondary, fontWeight: "700", letterSpacing: 1 }}>
-          ⌖ TAP "CHECK MY DISTANCE"
+      <View style={{ padding: 18, borderRadius: 16, backgroundColor: C.surface, borderWidth: 1, borderColor: C.borderSoft, alignItems: "center", gap: 8 }}>
+        <Ionicons name="navigate-circle-outline" size={36} color={C.textMuted} />
+        <Text style={{ fontSize: 14, color: C.textSecondary, fontWeight: "600", textAlign: "center" }}>
+          Tap “Check distance” to verify your position
         </Text>
       </View>
     );
   }
-  const inRange = distance <= RADIUS;
+
   const pct = Math.min(100, (distance / RADIUS) * 100);
+  const overflow = Math.min(100, ((distance - RADIUS) / RADIUS) * 100);
+  const ringScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.4] });
+  const ringOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0] });
+
   return (
-    <View style={{ borderWidth: 2, borderColor: C.border, backgroundColor: inRange ? "#003300" : "#330000", padding: 16, gap: 10 }}>
-      <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-end" }}>
+    <View
+      style={{
+        borderRadius: 18,
+        overflow: "hidden",
+        backgroundColor: inRange ? "#062F25" : "#3A0A0F",
+        padding: 18,
+        gap: 14,
+      }}
+    >
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
         <View>
-          <Text style={{ fontSize: 9, fontWeight: "900", letterSpacing: 2, color: inRange ? C.green : C.red, fontFamily: "Courier" }}>
-            {inRange ? "◉ IN RANGE" : "✕ OUT OF RANGE"}
+          <Text style={{ fontSize: 11, fontWeight: "700", color: inRange ? "#6EE7B7" : "#FCA5A5", letterSpacing: 1 }}>
+            {inRange ? "● IN RANGE" : "● OUT OF RANGE"}
           </Text>
-          <Text style={{ fontSize: 56, fontWeight: "900", color: "#fff", letterSpacing: -3, lineHeight: 56 }}>
+          <Text style={{ fontSize: 44, fontWeight: "800", color: "#fff", letterSpacing: -1.5, lineHeight: 46, marginTop: 2 }}>
             {distance.toFixed(0)}
-            <Text style={{ fontSize: 20 }}>m</Text>
+            <Text style={{ fontSize: 16, color: "rgba(255,255,255,0.75)" }}> m</Text>
           </Text>
-          <Text style={{ fontSize: 11, color: "rgba(255,255,255,0.6)", fontFamily: "Courier", marginTop: 2 }}>
-            LIMIT · {RADIUS}m
+          <Text style={{ fontSize: 12, color: "rgba(255,255,255,0.65)", marginTop: 2 }}>
+            Allowed radius {RADIUS} m
           </Text>
         </View>
-        <View style={{ alignItems: "center" }}>
+        <View style={{ width: 78, height: 78, alignItems: "center", justifyContent: "center" }}>
+          {inRange && (
+            <Animated.View
+              style={{
+                position: "absolute",
+                width: 78,
+                height: 78,
+                borderRadius: 39,
+                borderWidth: 2,
+                borderColor: C.green,
+                opacity: ringOpacity,
+                transform: [{ scale: ringScale }],
+              }}
+            />
+          )}
           <View
             style={{
-              width: 84,
-              height: 84,
-              borderWidth: 3,
-              borderColor: inRange ? C.green : C.red,
-              backgroundColor: inRange ? "rgba(0,195,0,0.15)" : "rgba(255,59,48,0.15)",
+              width: 60,
+              height: 60,
+              borderRadius: 30,
+              backgroundColor: inRange ? "rgba(16,185,129,0.25)" : "rgba(255,77,79,0.25)",
               alignItems: "center",
               justifyContent: "center",
+              borderWidth: 2,
+              borderColor: inRange ? C.green : C.red,
             }}
           >
-            <Ionicons name={inRange ? "checkmark-sharp" : "warning"} size={44} color={inRange ? C.green : C.red} />
+            <Ionicons name={inRange ? "checkmark" : "warning"} size={32} color={inRange ? C.green : C.red} />
           </View>
         </View>
       </View>
-      <View style={{ height: 8, backgroundColor: "rgba(255,255,255,0.15)", borderWidth: 1, borderColor: "rgba(255,255,255,0.3)" }}>
-        <View style={{ width: `${pct}%`, height: "100%", backgroundColor: inRange ? C.green : C.red }} />
+      <View style={{ height: 8, backgroundColor: "rgba(255,255,255,0.12)", borderRadius: 4, overflow: "hidden" }}>
+        <View style={{ width: `${inRange ? pct : 100}%`, height: "100%", backgroundColor: inRange ? C.green : C.red, borderRadius: 4 }} />
       </View>
     </View>
   );
@@ -130,7 +177,7 @@ export default function CustomerDetail() {
       setCustomer(c);
       setPhotos(p);
     } catch (e: any) {
-      Alert.alert("Error", e?.message || "Failed to load");
+      Alert.alert("Couldn't load", e?.message || "Please try again");
     } finally {
       setLoading(false);
     }
@@ -141,19 +188,18 @@ export default function CustomerDetail() {
   const ensureLocationPerm = async (): Promise<boolean> => {
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert("Permission required", "Location permission is required to verify your position near the customer.");
+      Alert.alert("Location required", "Please grant location access so we can verify your position.");
       return false;
     }
     return true;
   };
 
-  const getCurrentLocation = async () => {
-    return Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-  };
+  const getCurrentLocation = async () => Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
 
   const checkDistance = async () => {
     if (!customer?.latitude || !customer?.longitude) return;
     if (!(await ensureLocationPerm())) return;
+    h.tap();
     setGpsBusy(true);
     try {
       const pos = await getCurrentLocation();
@@ -162,8 +208,10 @@ export default function CustomerDetail() {
         { lat: pos.coords.latitude, lon: pos.coords.longitude }
       );
       setDistance(d);
+      if (d <= RADIUS) h.success();
+      else h.warning();
     } catch (e: any) {
-      Alert.alert("GPS error", e?.message || "Could not read location");
+      Alert.alert("GPS error", e?.message || "Couldn't read location");
     } finally {
       setGpsBusy(false);
     }
@@ -171,21 +219,23 @@ export default function CustomerDetail() {
 
   const onConfirmLocation = async () => {
     if (!(await ensureLocationPerm())) return;
+    h.medium();
     setBusy(true);
     try {
       const pos = await getCurrentLocation();
       if ((pos.coords as any).mocked) {
-        Alert.alert("Fake GPS detected", "Mock locations are not allowed.");
+        h.error();
+        Alert.alert("Mock location detected", "Disable mock locations and try again.");
         setBusy(false);
         return;
       }
       Alert.alert(
-        "Confirm location?",
-        `This LOCKS the customer location and CANNOT be changed by the app again.\n\nLat: ${pos.coords.latitude.toFixed(6)}\nLng: ${pos.coords.longitude.toFixed(6)}`,
+        "Lock this location?",
+        `Once locked, only an admin can change it.\n\nLat: ${pos.coords.latitude.toFixed(6)}\nLng: ${pos.coords.longitude.toFixed(6)}`,
         [
           { text: "Cancel", style: "cancel", onPress: () => setBusy(false) },
           {
-            text: "Lock Location",
+            text: "Lock",
             style: "destructive",
             onPress: async () => {
               try {
@@ -199,9 +249,11 @@ export default function CustomerDetail() {
                   }),
                 });
                 setCustomer(updated);
-                Alert.alert("Locked", "Customer location is now locked.");
+                h.success();
+                Alert.alert("Locked ✓", "Customer location is now locked.");
               } catch (e: any) {
-                Alert.alert("Error", e?.message || "Failed to confirm location");
+                h.error();
+                Alert.alert("Couldn't lock", e?.message || "Please try again");
               } finally {
                 setBusy(false);
               }
@@ -210,21 +262,23 @@ export default function CustomerDetail() {
         ]
       );
     } catch (e: any) {
-      Alert.alert("GPS error", e?.message || "Could not read location");
+      Alert.alert("GPS error", e?.message || "Couldn't read location");
       setBusy(false);
     }
   };
 
   const onTakePhoto = async () => {
     if (!customer?.latitude || !customer?.longitude) {
-      Alert.alert("Location not set", "Customer location must be set before taking photos.");
+      Alert.alert("Location not set", "Set the customer location before taking photos.");
       return;
     }
     if (!(await ensureLocationPerm())) return;
+    h.medium();
     try {
       const pos = await getCurrentLocation();
       if ((pos.coords as any).mocked) {
-        Alert.alert("Fake GPS detected", "Mock locations are not allowed.");
+        h.error();
+        Alert.alert("Mock location detected", "Disable mock locations and try again.");
         return;
       }
       const d = haversine(
@@ -233,10 +287,8 @@ export default function CustomerDetail() {
       );
       setDistance(d);
       if (d > RADIUS) {
-        Alert.alert(
-          "Out of range",
-          `You are ${d.toFixed(0)} m away.\nThis location is outside allowed customer range. Please move closer (within ${RADIUS} m).`
-        );
+        h.warning();
+        Alert.alert("Too far", `You're ${d.toFixed(0)} m away. Please move within ${RADIUS} m of the customer.`);
         return;
       }
       router.push({
@@ -250,60 +302,76 @@ export default function CustomerDetail() {
         },
       });
     } catch (e: any) {
-      Alert.alert("GPS error", e?.message || "Could not read location");
+      Alert.alert("GPS error", e?.message || "Couldn't read location");
     }
   };
 
   if (loading || !customer) {
     return (
       <SafeAreaView style={S.screen} edges={["top"]}>
-        <View style={{ padding: 24, alignItems: "center" }}>
+        <View style={{ padding: 48, alignItems: "center" }}>
           <ActivityIndicator color={C.primary} />
         </View>
       </SafeAreaView>
     );
   }
 
-  const inRange = distance != null && distance <= RADIUS;
   const outOfRange = distance != null && distance > RADIUS;
+  const canCapture = customer.location_locked && !outOfRange;
 
   return (
-    <SafeAreaView style={[S.screen, { backgroundColor: "#0A0A0A" }]} edges={["top"]}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 32 }}>
+    <SafeAreaView style={[S.screen, { backgroundColor: C.bg }]} edges={["top"]}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 140 }}>
         {/* Hero */}
         <ImageBackground
           source={{ uri: shelfFor(customer.customer_code) }}
-          style={{ height: 230 }}
-          imageStyle={{ opacity: 0.55 }}
+          style={{ height: 220 }}
+          imageStyle={{ opacity: 0.7 }}
         >
-          <View style={{ position: "absolute", inset: 0, backgroundColor: "rgba(0,0,0,0.5)" }} />
+          <View style={{ position: "absolute", inset: 0, backgroundColor: "rgba(0,0,0,0.45)" }} />
           <View style={{ flex: 1, padding: 16, justifyContent: "space-between" }}>
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-              <TouchableOpacity onPress={() => router.back()} testID="back-btn" style={{ width: 40, height: 40, backgroundColor: "#fff", borderWidth: 2, borderColor: "#fff", alignItems: "center", justifyContent: "center" }}>
+              <TouchableOpacity
+                onPress={() => { h.tap(); router.back(); }}
+                testID="back-btn"
+                style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: "rgba(255,255,255,0.95)", alignItems: "center", justifyContent: "center" }}
+              >
                 <Ionicons name="arrow-back" size={22} color={C.text} />
               </TouchableOpacity>
-              <View style={{ flexDirection: "row", gap: 6 }}>
-                <View style={[S.badge, statusStyle(customer.status), { borderColor: "#fff" }]}>
-                  <Text style={S.badgeText}>{customer.status.replace("_", " ")}</Text>
-                </View>
+              <View style={[{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, borderWidth: 1 }, statusStyle(customer.status)]}>
+                <Text style={{ fontSize: 11, fontWeight: "700", color: statusTextColor(customer.status) }}>
+                  {customer.status.replace("_", " ")}
+                </Text>
               </View>
             </View>
-            <View style={{ gap: 4 }}>
-              <Text style={{ color: C.yellow, fontSize: 11, fontWeight: "900", letterSpacing: 2.5, fontFamily: "Courier" }}>
-                {customer.customer_code} · ROUTE {customer.route_code || "—"}
+            <View style={{ gap: 6 }}>
+              <Text style={{ color: "rgba(255,255,255,0.85)", fontSize: 12, fontWeight: "600", letterSpacing: 0.4 }}>
+                {customer.customer_code} · Route {customer.route_code || "—"}
               </Text>
-              <Text style={{ color: "#fff", fontSize: 32, fontWeight: "900", letterSpacing: -1, lineHeight: 36 }}>
-                {customer.customer_name.toUpperCase()}
+              <Text style={{ color: "#fff", fontSize: 26, fontWeight: "800", letterSpacing: -0.5, lineHeight: 30 }}>
+                {customer.customer_name}
               </Text>
-              <View style={{ flexDirection: "row", gap: 6, marginTop: 6 }}>
-                <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderWidth: 2, borderColor: "#fff", backgroundColor: customer.location_locked ? C.green : C.red }}>
-                  <Text style={{ fontSize: 10, fontWeight: "900", letterSpacing: 1, color: "#fff" }}>
-                    {customer.location_locked ? "🔒 GPS LOCKED" : "🔓 GPS NOT SET"}
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 6 }}>
+                <View
+                  style={{
+                    paddingHorizontal: 10,
+                    paddingVertical: 5,
+                    borderRadius: 999,
+                    backgroundColor: customer.location_locked ? "rgba(16,185,129,0.95)" : "rgba(255,77,79,0.95)",
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 4,
+                  }}
+                >
+                  <Ionicons name={customer.location_locked ? "lock-closed" : "lock-open"} size={11} color="#fff" />
+                  <Text style={{ color: "#fff", fontSize: 11, fontWeight: "700" }}>
+                    {customer.location_locked ? "GPS locked" : "GPS not set"}
                   </Text>
                 </View>
-                <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderWidth: 2, borderColor: "#fff", backgroundColor: "rgba(0,0,0,0.6)" }}>
-                  <Text style={{ fontSize: 10, fontWeight: "900", letterSpacing: 1, color: "#fff", fontFamily: "Courier" }}>
-                    {photos.length} PHOTO{photos.length !== 1 ? "S" : ""}
+                <View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, backgroundColor: "rgba(0,0,0,0.55)", flexDirection: "row", alignItems: "center", gap: 4 }}>
+                  <Ionicons name="images" size={11} color="#fff" />
+                  <Text style={{ color: "#fff", fontSize: 11, fontWeight: "700" }}>
+                    {photos.length} photo{photos.length !== 1 ? "s" : ""}
                   </Text>
                 </View>
               </View>
@@ -311,178 +379,127 @@ export default function CustomerDetail() {
           </View>
         </ImageBackground>
 
-        <View style={{ padding: 16, gap: 14, backgroundColor: "#0A0A0A" }}>
-          {/* Distance gauge */}
+        <View style={{ padding: 16, gap: 14 }}>
           <DistanceGauge distance={distance} />
 
-          {/* GPS info card */}
-          <View style={{ borderWidth: 2, borderColor: "#fff", backgroundColor: "#000", padding: 14, gap: 10 }}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-              <Text style={{ color: "#fff", fontSize: 11, fontWeight: "900", letterSpacing: 2, fontFamily: "Courier" }}>
-                ◤ ERP TARGET
-              </Text>
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                <View style={{ width: 8, height: 8, backgroundColor: C.green }} />
-                <Text style={{ color: C.green, fontSize: 9, fontWeight: "900", letterSpacing: 1.5, fontFamily: "Courier" }}>
-                  TRACKING
-                </Text>
-              </View>
-            </View>
-            {customer.latitude != null && customer.longitude != null ? (
-              <>
-                <Text style={{ color: "#fff", fontFamily: "Courier", fontSize: 18, fontWeight: "700", letterSpacing: 1 }}>
-                  {customer.latitude.toFixed(6)}
-                </Text>
-                <Text style={{ color: "#fff", fontFamily: "Courier", fontSize: 18, fontWeight: "700", letterSpacing: 1 }}>
-                  {customer.longitude.toFixed(6)}
-                </Text>
-
-                {/* Mini map (radar) */}
-                <View
-                  style={{
-                    marginTop: 6,
-                    height: 160,
-                    backgroundColor: "#0F1F0F",
-                    borderWidth: 2,
-                    borderColor: C.green,
-                    position: "relative",
-                    overflow: "hidden",
-                  }}
-                >
-                  {/* Grid lines */}
-                  {[...Array(10)].map((_, i) => (
-                    <View key={`h${i}`} style={{ position: "absolute", left: 0, right: 0, top: i * 16, height: 1, backgroundColor: "rgba(0,195,0,0.15)" }} />
-                  ))}
-                  {[...Array(20)].map((_, i) => (
-                    <View key={`v${i}`} style={{ position: "absolute", top: 0, bottom: 0, left: i * 32, width: 1, backgroundColor: "rgba(0,195,0,0.15)" }} />
-                  ))}
-                  {/* Concentric range rings (centered) */}
-                  {[120, 80, 40].map((s, idx) => (
-                    <View
-                      key={`ring${idx}`}
-                      style={{
-                        position: "absolute",
-                        left: "50%",
-                        top: "50%",
-                        marginLeft: -s / 2,
-                        marginTop: -s / 2,
-                        width: s,
-                        height: s,
-                        borderRadius: s / 2,
-                        borderWidth: 1,
-                        borderColor: "rgba(0,195,0,0.5)",
-                      }}
-                    />
-                  ))}
-                  {/* Cross hairs */}
-                  <View style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 1, backgroundColor: "rgba(0,195,0,0.4)" }} />
-                  <View style={{ position: "absolute", top: "50%", left: 0, right: 0, height: 1, backgroundColor: "rgba(0,195,0,0.4)" }} />
-                  {/* Customer pin */}
-                  <View style={{ position: "absolute", left: "50%", top: "50%", marginLeft: -8, marginTop: -8, width: 16, height: 16, backgroundColor: C.red, borderWidth: 2, borderColor: "#fff" }} />
-                  <Text style={{ position: "absolute", top: 8, left: 8, color: C.green, fontSize: 9, fontWeight: "900", fontFamily: "Courier", letterSpacing: 1 }}>
-                    RADAR · {customer.customer_code}
-                  </Text>
-                  <Text style={{ position: "absolute", bottom: 8, right: 8, color: C.green, fontSize: 9, fontFamily: "Courier" }}>
-                    R={RADIUS}m
+          {/* GPS card */}
+          <View style={{ backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.borderSoft, padding: 16, gap: 12 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: "#EEF2FF", alignItems: "center", justifyContent: "center" }}>
+                  <Ionicons name="location" size={18} color={C.primary} />
+                </View>
+                <View>
+                  <Text style={{ fontSize: 14, fontWeight: "700", color: C.text }}>Customer coordinates</Text>
+                  <Text style={{ fontSize: 11, color: C.textMuted }}>
+                    {customer.location_locked ? "Locked from ERP / first visit" : "Awaiting first lock"}
                   </Text>
                 </View>
-              </>
+              </View>
+            </View>
+
+            {customer.latitude != null && customer.longitude != null ? (
+              <View style={{ flexDirection: "row", gap: 10 }}>
+                <View style={{ flex: 1, padding: 10, backgroundColor: C.bgSubtle, borderRadius: 10 }}>
+                  <Text style={{ fontSize: 10, fontWeight: "700", color: C.textMuted, letterSpacing: 0.5 }}>LATITUDE</Text>
+                  <Text style={{ fontSize: 16, fontWeight: "700", color: C.text, marginTop: 2 }}>{customer.latitude.toFixed(6)}</Text>
+                </View>
+                <View style={{ flex: 1, padding: 10, backgroundColor: C.bgSubtle, borderRadius: 10 }}>
+                  <Text style={{ fontSize: 10, fontWeight: "700", color: C.textMuted, letterSpacing: 0.5 }}>LONGITUDE</Text>
+                  <Text style={{ fontSize: 16, fontWeight: "700", color: C.text, marginTop: 2 }}>{customer.longitude.toFixed(6)}</Text>
+                </View>
+              </View>
             ) : (
-              <Text style={{ color: "rgba(255,255,255,0.7)", fontSize: 13 }}>
-                Not set. The first sales rep on-site can lock the customer location.
-              </Text>
+              <View style={{ padding: 14, backgroundColor: "#FFF7ED", borderRadius: 10, borderWidth: 1, borderColor: "#FED7AA", flexDirection: "row", alignItems: "center", gap: 10 }}>
+                <Ionicons name="warning" size={18} color={C.orange} />
+                <Text style={{ flex: 1, fontSize: 13, color: "#9A3412", fontWeight: "500" }}>
+                  Visit the store and tap “Lock GPS” to set coordinates. This can only be done once.
+                </Text>
+              </View>
+            )}
+
+            {/* Mini map */}
+            {customer.latitude != null && customer.longitude != null && (
+              <View style={{ height: 140, borderRadius: 12, backgroundColor: "#F8FAFC", borderWidth: 1, borderColor: C.borderSoft, position: "relative", overflow: "hidden" }}>
+                {[...Array(8)].map((_, i) => (
+                  <View key={`h${i}`} style={{ position: "absolute", left: 0, right: 0, top: (i + 1) * 16, height: 1, backgroundColor: "#E5E7EB" }} />
+                ))}
+                {[...Array(20)].map((_, i) => (
+                  <View key={`v${i}`} style={{ position: "absolute", top: 0, bottom: 0, left: i * 32, width: 1, backgroundColor: "#E5E7EB" }} />
+                ))}
+                {[120, 80, 40].map((s, idx) => (
+                  <View
+                    key={`ring${idx}`}
+                    style={{
+                      position: "absolute",
+                      left: "50%",
+                      top: "50%",
+                      marginLeft: -s / 2,
+                      marginTop: -s / 2,
+                      width: s,
+                      height: s,
+                      borderRadius: s / 2,
+                      borderWidth: 1,
+                      borderColor: idx === 2 ? "rgba(27,67,255,0.5)" : "rgba(27,67,255,0.2)",
+                    }}
+                  />
+                ))}
+                <View style={{ position: "absolute", left: "50%", top: "50%", marginLeft: -10, marginTop: -10, width: 20, height: 20, borderRadius: 10, backgroundColor: C.red, borderWidth: 3, borderColor: "#fff" }} />
+                <View style={{ position: "absolute", top: 8, left: 10, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: "#fff", borderWidth: 1, borderColor: C.borderSoft }}>
+                  <Text style={{ fontSize: 10, fontWeight: "700", color: C.text }}>{RADIUS} m radius</Text>
+                </View>
+              </View>
             )}
 
             <TouchableOpacity
               onPress={checkDistance}
               disabled={gpsBusy || customer.latitude == null}
+              testID="check-distance-btn"
               style={{
-                marginTop: 4,
-                padding: 12,
-                borderWidth: 2,
-                borderColor: "#fff",
-                backgroundColor: "#fff",
+                paddingVertical: 13,
+                borderRadius: 12,
+                backgroundColor: C.bgInk,
                 alignItems: "center",
-                flexDirection: "row",
                 justifyContent: "center",
+                flexDirection: "row",
                 gap: 8,
                 opacity: gpsBusy || customer.latitude == null ? 0.5 : 1,
               }}
-              testID="check-distance-btn"
             >
-              <Ionicons name="navigate" size={16} color={C.text} />
-              <Text style={{ color: C.text, fontWeight: "900", letterSpacing: 1, textTransform: "uppercase", fontSize: 12 }}>
-                {gpsBusy ? "Reading GPS..." : "Check My Distance"}
+              {gpsBusy ? <ActivityIndicator color="#fff" size="small" /> : <Ionicons name="navigate" size={16} color="#fff" />}
+              <Text style={{ color: "#fff", fontWeight: "700", fontSize: 14 }}>
+                {gpsBusy ? "Reading GPS…" : "Check distance"}
               </Text>
             </TouchableOpacity>
           </View>
 
-          {/* Action buttons */}
-          {!customer.location_locked && (
-            <TouchableOpacity
-              onPress={onConfirmLocation}
-              disabled={busy}
-              testID="confirm-location-btn"
-              style={{ borderWidth: 2, borderColor: "#fff", backgroundColor: C.yellow, padding: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, opacity: busy ? 0.6 : 1 }}
-            >
-              <Ionicons name="lock-closed" size={20} color={C.text} />
-              <Text style={{ fontSize: 14, fontWeight: "900", letterSpacing: 1.5, color: C.text, textTransform: "uppercase" }}>
-                {busy ? "Locking..." : "Confirm & Lock Location"}
-              </Text>
-            </TouchableOpacity>
-          )}
-
-          <TouchableOpacity
-            onPress={onTakePhoto}
-            disabled={!customer.location_locked || outOfRange === true}
-            testID="take-photo-btn"
-            style={{
-              borderWidth: 2,
-              borderColor: "#fff",
-              backgroundColor: !customer.location_locked || outOfRange === true ? "#3A3A3A" : C.primary,
-              padding: 18,
-              flexDirection: "row",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: 10,
-            }}
-          >
-            <Ionicons name="camera" size={22} color="#fff" />
-            <Text style={{ fontSize: 16, fontWeight: "900", letterSpacing: 2, color: "#fff", textTransform: "uppercase" }}>
-              ◉ Capture Shelf
-            </Text>
-          </TouchableOpacity>
-
           {/* Photo grid */}
-          <View style={{ marginTop: 8 }}>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <Text style={{ color: "#fff", fontSize: 11, fontWeight: "900", letterSpacing: 2, fontFamily: "Courier" }}>
-                ◢ UPLOADED PHOTOS
-              </Text>
-              <Text style={{ color: C.yellow, fontSize: 11, fontWeight: "900", letterSpacing: 1, fontFamily: "Courier" }}>
-                {photos.length} REC
-              </Text>
+          <View>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <Text style={{ fontSize: 14, fontWeight: "700", color: C.text }}>Uploaded photos</Text>
+              {photos.length > 0 && (
+                <Text style={{ fontSize: 11, fontWeight: "600", color: C.textMuted }}>{photos.length} total</Text>
+              )}
             </View>
             {photos.length === 0 ? (
-              <View style={{ alignItems: "center", padding: 28, borderWidth: 2, borderColor: "#fff", backgroundColor: "rgba(255,255,255,0.04)" }}>
-                <Ionicons name="images-outline" size={32} color="#fff" />
-                <Text style={{ color: "#fff", marginTop: 8, fontSize: 13, fontFamily: "Courier" }}>NO RECORDS YET</Text>
+              <View style={{ alignItems: "center", padding: 30, backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.borderSoft, gap: 10 }}>
+                <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: C.bgSubtle, alignItems: "center", justifyContent: "center" }}>
+                  <Ionicons name="camera-outline" size={28} color={C.textMuted} />
+                </View>
+                <Text style={{ fontSize: 14, color: C.text, fontWeight: "600" }}>No photos yet</Text>
+                <Text style={{ fontSize: 12, color: C.textMuted, textAlign: "center" }}>
+                  Get within {RADIUS} m and capture a shelf photo.
+                </Text>
               </View>
             ) : (
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                 {photos.map((p) => (
-                  <View key={p.id} testID={`photo-${p.id}`} style={{ width: PHOTO_W, borderWidth: 2, borderColor: "#fff", backgroundColor: "#000" }}>
-                    <Image
-                      source={{ uri: `data:image/jpeg;base64,${p.photo_base64}` }}
-                      style={{ width: "100%", height: PHOTO_W, backgroundColor: "#000" }}
-                      resizeMode="cover"
-                    />
-                    <View style={{ padding: 6, gap: 2 }}>
-                      <Text style={{ color: C.green, fontFamily: "Courier", fontSize: 9, fontWeight: "900", letterSpacing: 1 }}>
-                        ◉ {p.distance.toFixed(1)}m
-                      </Text>
-                      <Text style={{ color: "rgba(255,255,255,0.7)", fontFamily: "Courier", fontSize: 9 }}>
-                        {new Date(p.upload_date).toLocaleDateString()} {new Date(p.upload_date).toLocaleTimeString().slice(0, 5)}
+                  <View key={p.id} testID={`photo-${p.id}`} style={{ width: PHOTO_W, borderRadius: 12, backgroundColor: C.surface, borderWidth: 1, borderColor: C.borderSoft, overflow: "hidden" }}>
+                    <Image source={{ uri: `data:image/jpeg;base64,${p.photo_base64}` }} style={{ width: "100%", height: PHOTO_W, backgroundColor: "#000" }} resizeMode="cover" />
+                    <View style={{ padding: 8, gap: 2 }}>
+                      <Text style={{ fontSize: 11, fontWeight: "700", color: C.green }}>● {p.distance.toFixed(1)} m</Text>
+                      <Text style={{ fontSize: 10, color: C.textMuted }}>
+                        {new Date(p.upload_date).toLocaleDateString()} · {new Date(p.upload_date).toLocaleTimeString().slice(0, 5)}
                       </Text>
                     </View>
                   </View>
@@ -492,6 +509,52 @@ export default function CustomerDetail() {
           </View>
         </View>
       </ScrollView>
+
+      {/* Sticky bottom actions */}
+      <View style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: 14, paddingBottom: 22, backgroundColor: "rgba(250,250,247,0.96)", borderTopWidth: 1, borderTopColor: C.borderSoft }}>
+        {!customer.location_locked ? (
+          <TouchableOpacity
+            onPress={onConfirmLocation}
+            disabled={busy}
+            testID="confirm-location-btn"
+            style={{
+              minHeight: 56,
+              borderRadius: 14,
+              backgroundColor: C.yellow,
+              alignItems: "center",
+              justifyContent: "center",
+              flexDirection: "row",
+              gap: 10,
+              opacity: busy ? 0.5 : 1,
+            }}
+          >
+            {busy ? <ActivityIndicator color={C.text} /> : <Ionicons name="lock-closed" size={20} color={C.text} />}
+            <Text style={{ color: C.text, fontWeight: "700", fontSize: 15 }}>
+              {busy ? "Locking…" : "Lock GPS at this spot"}
+            </Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            onPress={onTakePhoto}
+            disabled={!canCapture}
+            testID="take-photo-btn"
+            style={{
+              minHeight: 56,
+              borderRadius: 14,
+              backgroundColor: canCapture ? C.primary : C.bgMuted,
+              alignItems: "center",
+              justifyContent: "center",
+              flexDirection: "row",
+              gap: 10,
+            }}
+          >
+            <Ionicons name="camera" size={22} color={canCapture ? "#fff" : C.textMuted} />
+            <Text style={{ color: canCapture ? "#fff" : C.textMuted, fontWeight: "700", fontSize: 16, letterSpacing: 0.3 }}>
+              {outOfRange ? `Move closer (${distance?.toFixed(0)} m away)` : "Capture shelf photo"}
+            </Text>
+          </TouchableOpacity>
+        )}
+      </View>
     </SafeAreaView>
   );
 }

@@ -7,7 +7,6 @@ import {
   Image,
   Alert,
   ActivityIndicator,
-  ImageBackground,
   Dimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -15,7 +14,7 @@ import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api, useAuth } from "../../src/auth";
 import { S, C } from "../../src/theme";
-import { ASSETS } from "../../src/assets";
+import * as h from "../../src/haptics";
 
 type Photo = {
   id: string;
@@ -96,11 +95,11 @@ export default function Admin() {
               sales_rep_code: c.sales_rep_code,
             });
           }
-        } catch { /* ignore */ }
+        } catch {}
       }
       setCustomers(cs);
     } catch (e: any) {
-      Alert.alert("Error", e?.message || "Failed to load admin data");
+      Alert.alert("Couldn't load", e?.message || "Please try again");
     } finally {
       setLoading(false);
     }
@@ -112,10 +111,12 @@ export default function Admin() {
     if (!token) return;
     try {
       await api(`/api/admin/customer/${code}/reset-location`, { method: "POST", token });
-      Alert.alert("Done", `Location reset for ${code}`);
+      h.success();
+      Alert.alert("Reset done", `Location unlocked for ${code}`);
       loadAll();
     } catch (e: any) {
-      Alert.alert("Error", e?.message || "Reset failed");
+      h.error();
+      Alert.alert("Couldn't reset", e?.message || "Please try again");
     }
   };
 
@@ -126,56 +127,45 @@ export default function Admin() {
     users: users.length,
   };
 
-  const tabConfig: Record<Tab, { label: string; icon: any; color: string }> = {
-    photos: { label: "Photos", icon: "images", color: C.primary },
-    fakegps: { label: "Fake GPS", icon: "warning", color: C.red },
-    customers: { label: "Customers", icon: "storefront", color: C.yellow },
-    users: { label: "Users", icon: "people", color: C.green },
+  const tabConfig: Record<Tab, { label: string; icon: any }> = {
+    photos: { label: "Photos", icon: "images" },
+    fakegps: { label: "Alerts", icon: "shield" },
+    customers: { label: "Stores", icon: "storefront" },
+    users: { label: "Team", icon: "people" },
   };
 
   return (
-    <SafeAreaView style={[S.screen, { backgroundColor: "#0A0A0A" }]} edges={["top"]}>
+    <SafeAreaView style={S.screen} edges={["top"]}>
       <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
-        {/* Hero */}
-        <ImageBackground
-          source={{ uri: ASSETS.syncGraphic }}
-          style={{ padding: 16, paddingTop: 8 }}
-          imageStyle={{ opacity: 0.25 }}
-        >
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <View style={{ width: 10, height: 10, backgroundColor: C.red }} />
-              <Text style={{ color: C.red, fontSize: 10, fontWeight: "900", letterSpacing: 2.5, fontFamily: "Courier" }}>
-                ADMIN · CONTROL CENTER
-              </Text>
-            </View>
-            <Text style={{ color: "rgba(255,255,255,0.6)", fontSize: 10, fontFamily: "Courier" }}>
-              {new Date().toLocaleTimeString()}
+        {/* Header */}
+        <View style={{ padding: 16, gap: 14 }}>
+          <View>
+            <Text style={{ fontSize: 12, fontWeight: "700", color: C.textMuted, letterSpacing: 1.2, textTransform: "uppercase" }}>
+              Control center
+            </Text>
+            <Text style={{ fontSize: 28, fontWeight: "800", color: C.text, letterSpacing: -0.8, marginTop: 2 }}>
+              Operations
             </Text>
           </View>
-          <Text style={{ color: "#fff", fontSize: 40, fontWeight: "900", letterSpacing: -2, marginTop: 4 }}>
-            COMMAND.
-          </Text>
 
           {/* KPI tiles */}
-          <View style={{ flexDirection: "row", gap: 8, marginTop: 12 }}>
+          <View style={{ flexDirection: "row", gap: 8 }}>
             {[
-              { v: stats.photos, label: "PHOTOS", bg: C.primary, fg: "#fff" },
-              { v: stats.fakeGps, label: "ALERTS", bg: C.red, fg: "#fff" },
-              { v: stats.locked, label: "LOCKED", bg: C.yellow, fg: C.text },
-              { v: stats.users, label: "USERS", bg: "#fff", fg: C.text },
+              { v: stats.photos, label: "Photos", icon: "images" as const, accent: C.primary, bg: "#EEF2FF" },
+              { v: stats.fakeGps, label: "Alerts", icon: "shield" as const, accent: C.red, bg: C.redSoft },
+              { v: stats.locked, label: "Locked", icon: "lock-closed" as const, accent: C.green, bg: C.greenSoft },
+              { v: stats.users, label: "Team", icon: "people" as const, accent: C.text, bg: C.surface },
             ].map((s, i) => (
-              <View key={i} style={{ flex: 1, padding: 10, backgroundColor: s.bg, borderWidth: 2, borderColor: "#fff" }}>
-                <Text style={{ fontSize: 26, fontWeight: "900", color: s.fg, letterSpacing: -1 }}>{s.v}</Text>
-                <Text style={{ fontSize: 9, fontWeight: "900", color: s.fg, letterSpacing: 1.5 }}>{s.label}</Text>
+              <View key={i} style={{ flex: 1, padding: 12, backgroundColor: s.bg, borderRadius: 14, borderWidth: 1, borderColor: C.borderSoft }}>
+                <Ionicons name={s.icon} size={14} color={s.accent} />
+                <Text style={{ fontSize: 22, fontWeight: "800", color: C.text, letterSpacing: -0.5, marginTop: 4 }}>{s.v}</Text>
+                <Text style={{ fontSize: 11, fontWeight: "600", color: C.textSecondary }}>{s.label}</Text>
               </View>
             ))}
           </View>
-        </ImageBackground>
 
-        {/* Tabs */}
-        <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
-          <View style={{ flexDirection: "row", gap: 6 }}>
+          {/* Tabs */}
+          <View style={{ flexDirection: "row", gap: 6, padding: 4, backgroundColor: C.bgSubtle, borderRadius: 12 }}>
             {(Object.keys(tabConfig) as Tab[]).map((t) => {
               const cfg = tabConfig[t];
               const active = tab === t;
@@ -183,21 +173,26 @@ export default function Admin() {
                 <TouchableOpacity
                   key={t}
                   testID={`admin-tab-${t}`}
-                  onPress={() => setTab(t)}
+                  onPress={() => { h.tap(); setTab(t); }}
                   style={{
                     flex: 1,
-                    paddingVertical: 10,
-                    paddingHorizontal: 4,
-                    backgroundColor: active ? cfg.color : "transparent",
-                    borderWidth: 2,
-                    borderColor: "#fff",
+                    paddingVertical: 9,
+                    paddingHorizontal: 6,
+                    borderRadius: 9,
+                    backgroundColor: active ? C.surface : "transparent",
                     alignItems: "center",
-                    gap: 2,
+                    flexDirection: "row",
+                    justifyContent: "center",
+                    gap: 6,
+                    shadowColor: active ? C.border : "transparent",
+                    shadowOffset: { width: 0, height: 1 },
+                    shadowOpacity: active ? 0.1 : 0,
+                    shadowRadius: 2,
                   }}
                 >
-                  <Ionicons name={cfg.icon} size={16} color={active ? (t === "customers" ? C.text : "#fff") : "#fff"} />
-                  <Text style={{ fontSize: 9, fontWeight: "900", letterSpacing: 1, color: active ? (t === "customers" ? C.text : "#fff") : "#fff" }}>
-                    {cfg.label.toUpperCase()}
+                  <Ionicons name={cfg.icon} size={14} color={active ? C.text : C.textMuted} />
+                  <Text style={{ fontSize: 12, fontWeight: "700", color: active ? C.text : C.textMuted }}>
+                    {cfg.label}
                   </Text>
                 </TouchableOpacity>
               );
@@ -205,29 +200,26 @@ export default function Admin() {
           </View>
         </View>
 
-        {/* Body */}
-        <View style={{ padding: 16, gap: 10 }}>
+        <View style={{ paddingHorizontal: 16, gap: 10 }}>
           {loading ? (
-            <View style={{ padding: 24, alignItems: "center" }}>
+            <View style={{ padding: 36, alignItems: "center" }}>
               <ActivityIndicator color={C.primary} />
             </View>
           ) : tab === "photos" ? (
             photos.length === 0 ? (
-              <Empty icon="images" label="No photos uploaded" />
+              <Empty icon="images" label="No photos yet" sub="Reps will start showing up here." />
             ) : (
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                 {photos.map((p) => (
-                  <View key={p.id} testID={`admin-photo-${p.id}`} style={{ width: PHOTO_W, backgroundColor: "#000", borderWidth: 2, borderColor: "#fff" }}>
+                  <View key={p.id} testID={`admin-photo-${p.id}`} style={{ width: PHOTO_W, backgroundColor: C.surface, borderRadius: 14, borderWidth: 1, borderColor: C.borderSoft, overflow: "hidden" }}>
                     <Image source={{ uri: `data:image/jpeg;base64,${p.photo_base64}` }} style={{ width: "100%", height: PHOTO_W }} resizeMode="cover" />
-                    <View style={{ padding: 6, gap: 2 }}>
-                      <Text style={{ color: "#fff", fontSize: 11, fontWeight: "900", letterSpacing: 0.5 }} numberOfLines={1}>
+                    <View style={{ padding: 10, gap: 3 }}>
+                      <Text style={{ fontSize: 13, fontWeight: "700", color: C.text }} numberOfLines={1}>
                         {p.customer_name || p.customer_code}
                       </Text>
-                      <Text style={{ color: C.green, fontFamily: "Courier", fontSize: 9, fontWeight: "900" }}>
-                        ◉ {p.distance.toFixed(1)}m · {p.username}
-                      </Text>
-                      <Text style={{ color: "rgba(255,255,255,0.6)", fontFamily: "Courier", fontSize: 9 }}>
-                        {new Date(p.upload_date).toLocaleDateString()} {new Date(p.upload_date).toLocaleTimeString().slice(0, 5)}
+                      <Text style={{ fontSize: 11, fontWeight: "600", color: C.green }}>● {p.distance.toFixed(1)} m · {p.username}</Text>
+                      <Text style={{ fontSize: 10, color: C.textMuted }}>
+                        {new Date(p.upload_date).toLocaleDateString()} · {new Date(p.upload_date).toLocaleTimeString().slice(0, 5)}
                       </Text>
                     </View>
                   </View>
@@ -236,50 +228,54 @@ export default function Admin() {
             )
           ) : tab === "fakegps" ? (
             logs.length === 0 ? (
-              <Empty icon="shield-checkmark" label="No fake GPS attempts" sub="System integrity nominal" />
+              <Empty icon="shield-checkmark" label="No alerts" sub="System integrity nominal." accent={C.green} />
             ) : (
               logs.map((l) => (
-                <View key={l.id} style={{ borderLeftWidth: 6, borderLeftColor: C.red, borderTopWidth: 2, borderRightWidth: 2, borderBottomWidth: 2, borderColor: "#fff", backgroundColor: "rgba(255,59,48,0.12)", padding: 12, gap: 4 }}>
+                <View key={l.id} style={{ borderRadius: 14, backgroundColor: C.surface, borderWidth: 1, borderColor: "#FECDD3", padding: 14, gap: 8 }}>
                   <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                      <Ionicons name="warning" size={16} color={C.red} />
-                      <Text style={{ color: "#fff", fontWeight: "900", fontSize: 14 }}>{l.username || l.user_code}</Text>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <View style={{ width: 30, height: 30, borderRadius: 8, backgroundColor: C.redSoft, alignItems: "center", justifyContent: "center" }}>
+                        <Ionicons name="warning" size={16} color={C.red} />
+                      </View>
+                      <Text style={{ fontSize: 15, fontWeight: "700", color: C.text }}>{l.username || l.user_code}</Text>
                     </View>
-                    <View style={{ paddingHorizontal: 6, paddingVertical: 2, backgroundColor: C.red, borderWidth: 1, borderColor: "#fff" }}>
-                      <Text style={{ fontSize: 9, fontWeight: "900", color: "#fff", letterSpacing: 1 }}>BLOCKED</Text>
+                    <View style={{ paddingHorizontal: 8, paddingVertical: 3, backgroundColor: C.red, borderRadius: 999 }}>
+                      <Text style={{ fontSize: 10, fontWeight: "700", color: "#fff" }}>BLOCKED</Text>
                     </View>
                   </View>
-                  <Text style={{ color: "#fff", fontSize: 13 }}>{l.reason}</Text>
-                  <Text style={{ color: "rgba(255,255,255,0.5)", fontFamily: "Courier", fontSize: 10 }}>
-                    {l.customer_code || "—"} · {l.latitude.toFixed(5)}, {l.longitude.toFixed(5)}
-                  </Text>
-                  <Text style={{ color: "rgba(255,255,255,0.5)", fontFamily: "Courier", fontSize: 10 }}>
-                    {new Date(l.created_at).toLocaleString()}
+                  <Text style={{ color: C.text, fontSize: 13 }}>{l.reason}</Text>
+                  <Text style={{ color: C.textMuted, fontSize: 11 }}>
+                    {l.customer_code || "—"} · {l.latitude.toFixed(5)}, {l.longitude.toFixed(5)} · {new Date(l.created_at).toLocaleString()}
                   </Text>
                 </View>
               ))
             )
           ) : tab === "customers" ? (
             customers.length === 0 ? (
-              <Empty icon="storefront" label="No customers" />
+              <Empty icon="storefront" label="No stores" />
             ) : (
               customers.map((c) => (
-                <View key={c.customer_code} style={{ backgroundColor: "#fff", borderWidth: 2, borderColor: "#fff", padding: 12, gap: 8 }}>
+                <View key={c.customer_code} style={{ backgroundColor: C.surface, borderRadius: 14, borderWidth: 1, borderColor: C.borderSoft, padding: 14, gap: 10 }}>
                   <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
                     <View style={{ flex: 1 }}>
-                      <Text style={S.label}>{c.customer_code} · {c.sales_rep_code || "—"}</Text>
-                      <Text style={S.h3}>{c.customer_name}</Text>
+                      <Text style={{ fontSize: 11, fontWeight: "600", color: C.textMuted }}>
+                        {c.customer_code} · {c.sales_rep_code || "—"}
+                      </Text>
+                      <Text style={{ fontSize: 16, fontWeight: "700", color: C.text, marginTop: 2 }}>{c.customer_name}</Text>
                     </View>
-                    <View style={{ paddingHorizontal: 8, paddingVertical: 4, backgroundColor: c.location_locked ? C.green : C.red, borderWidth: 2, borderColor: C.text }}>
-                      <Text style={{ fontSize: 10, fontWeight: "900", color: "#fff", letterSpacing: 1 }}>
-                        {c.location_locked ? "LOCKED" : "OPEN"}
+                    <View style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: c.location_locked ? C.greenSoft : C.redSoft, borderWidth: 1, borderColor: c.location_locked ? "#A7F3D0" : "#FECDD3" }}>
+                      <Text style={{ fontSize: 11, fontWeight: "700", color: c.location_locked ? "#065F46" : "#9F1239" }}>
+                        {c.location_locked ? "Locked" : "Open"}
                       </Text>
                     </View>
                   </View>
                   {c.latitude != null && c.longitude != null && (
-                    <Text style={{ fontFamily: "Courier", fontSize: 11, color: C.textSecondary }}>
-                      ◎ {c.latitude.toFixed(5)}, {c.longitude.toFixed(5)}
-                    </Text>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                      <Ionicons name="location-outline" size={13} color={C.textMuted} />
+                      <Text style={{ fontSize: 12, color: C.textSecondary }}>
+                        {c.latitude.toFixed(5)}, {c.longitude.toFixed(5)}
+                      </Text>
+                    </View>
                   )}
                   {c.location_locked && (
                     <TouchableOpacity
@@ -290,12 +286,10 @@ export default function Admin() {
                           { text: "Reset", style: "destructive", onPress: () => resetLocation(c.customer_code) },
                         ])
                       }
-                      style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, padding: 10, backgroundColor: C.yellow, borderWidth: 2, borderColor: C.text }}
+                      style={{ paddingVertical: 11, borderRadius: 10, backgroundColor: C.bgSubtle, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 6 }}
                     >
-                      <Ionicons name="refresh" size={16} color={C.text} />
-                      <Text style={{ fontWeight: "900", letterSpacing: 1, color: C.text, textTransform: "uppercase", fontSize: 11 }}>
-                        Reset Location
-                      </Text>
+                      <Ionicons name="refresh" size={15} color={C.text} />
+                      <Text style={{ fontSize: 13, fontWeight: "700", color: C.text }}>Reset location</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -303,21 +297,21 @@ export default function Admin() {
             )
           ) : (
             users.map((u) => (
-              <View key={u.id} style={{ backgroundColor: "#fff", borderWidth: 2, borderColor: "#fff", padding: 12, flexDirection: "row", alignItems: "center", gap: 12 }}>
-                <View style={{ width: 44, height: 44, backgroundColor: u.role === "admin" ? C.red : C.primary, borderWidth: 2, borderColor: C.text, alignItems: "center", justifyContent: "center" }}>
-                  <Text style={{ color: "#fff", fontWeight: "900", fontSize: 18 }}>
+              <View key={u.id} style={{ backgroundColor: C.surface, borderRadius: 14, borderWidth: 1, borderColor: C.borderSoft, padding: 12, flexDirection: "row", alignItems: "center", gap: 12 }}>
+                <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: u.role === "admin" ? C.red : C.primary, alignItems: "center", justifyContent: "center" }}>
+                  <Text style={{ color: "#fff", fontWeight: "800", fontSize: 18 }}>
                     {u.name?.[0]?.toUpperCase() || "U"}
                   </Text>
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={S.h3}>{u.name}</Text>
-                  <Text style={{ fontFamily: "Courier", fontSize: 12, color: C.textSecondary }}>
+                  <Text style={{ fontSize: 15, fontWeight: "700", color: C.text }}>{u.name}</Text>
+                  <Text style={{ fontSize: 12, color: C.textMuted }}>
                     @{u.username} {u.sales_rep_code ? `· ${u.sales_rep_code}` : ""}
                   </Text>
                 </View>
-                <View style={{ paddingHorizontal: 6, paddingVertical: 4, backgroundColor: u.role === "admin" ? C.red : C.yellow, borderWidth: 2, borderColor: C.text }}>
-                  <Text style={{ fontSize: 9, fontWeight: "900", color: u.role === "admin" ? "#fff" : C.text, letterSpacing: 1 }}>
-                    {u.role.toUpperCase()}
+                <View style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999, backgroundColor: u.role === "admin" ? C.redSoft : C.yellowSoft }}>
+                  <Text style={{ fontSize: 10, fontWeight: "700", color: u.role === "admin" ? "#9F1239" : "#92670B" }}>
+                    {u.role}
                   </Text>
                 </View>
               </View>
@@ -329,12 +323,14 @@ export default function Admin() {
   );
 }
 
-function Empty({ icon, label, sub }: { icon: any; label: string; sub?: string }) {
+function Empty({ icon, label, sub, accent }: { icon: any; label: string; sub?: string; accent?: string }) {
   return (
-    <View style={{ alignItems: "center", padding: 36, borderWidth: 2, borderColor: "#fff", backgroundColor: "rgba(255,255,255,0.04)" }}>
-      <Ionicons name={icon} size={36} color="#fff" />
-      <Text style={{ color: "#fff", marginTop: 10, fontSize: 13, fontWeight: "800", letterSpacing: 1, textTransform: "uppercase" }}>{label}</Text>
-      {sub && <Text style={{ color: "rgba(255,255,255,0.5)", marginTop: 4, fontSize: 11, fontFamily: "Courier" }}>{sub}</Text>}
+    <View style={{ alignItems: "center", padding: 36, backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.borderSoft, gap: 8 }}>
+      <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: C.bgSubtle, alignItems: "center", justifyContent: "center" }}>
+        <Ionicons name={icon} size={28} color={accent || C.textMuted} />
+      </View>
+      <Text style={{ fontSize: 14, color: C.text, fontWeight: "700" }}>{label}</Text>
+      {sub && <Text style={{ fontSize: 12, color: C.textMuted }}>{sub}</Text>}
     </View>
   );
 }

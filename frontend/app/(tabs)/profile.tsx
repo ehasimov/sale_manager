@@ -1,135 +1,162 @@
-import { View, Text, TouchableOpacity, ScrollView, ImageBackground } from "react-native";
+import { View, Text, TouchableOpacity, ScrollView, Alert } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "../../src/auth";
 import { S, C } from "../../src/theme";
-import { ASSETS } from "../../src/assets";
+import * as h from "../../src/haptics";
 
 export default function Profile() {
   const { user, logout } = useAuth();
   const router = useRouter();
-
   const isAdmin = user?.role === "admin";
 
-  return (
-    <SafeAreaView style={[S.screen, { backgroundColor: "#0A0A0A" }]} edges={["top"]}>
-      <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
-        {/* Hero */}
-        <ImageBackground
-          source={{ uri: ASSETS.loginBackground }}
-          style={{ paddingHorizontal: 16, paddingTop: 8, paddingBottom: 28 }}
-          imageStyle={{ opacity: 0.35 }}
-        >
-          <View style={{ position: "absolute", inset: 0, backgroundColor: "rgba(0,0,0,0.55)" }} />
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-            <Text style={{ color: C.yellow, fontSize: 10, fontWeight: "900", letterSpacing: 2.5, fontFamily: "Courier" }}>
-              ◢ OPERATOR PROFILE
-            </Text>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <View style={{ width: 8, height: 8, backgroundColor: C.green }} />
-              <Text style={{ color: C.green, fontSize: 10, fontWeight: "900", letterSpacing: 1.5, fontFamily: "Courier" }}>
-                ACTIVE
-              </Text>
-            </View>
-          </View>
+  const onLogout = () =>
+    Alert.alert("Sign out?", "You'll be returned to the login screen.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Sign out",
+        style: "destructive",
+        onPress: async () => {
+          h.medium();
+          await logout();
+          router.replace("/login");
+        },
+      },
+    ]);
 
-          <View style={{ marginTop: 18, flexDirection: "row", alignItems: "center", gap: 14 }}>
-            <View
-              style={{
-                width: 76,
-                height: 76,
-                backgroundColor: isAdmin ? C.red : C.primary,
-                borderWidth: 3,
-                borderColor: "#fff",
-                alignItems: "center",
-                justifyContent: "center",
-              }}
-            >
-              <Text style={{ color: "#fff", fontWeight: "900", fontSize: 34, letterSpacing: -1 }}>
-                {user?.name?.[0]?.toUpperCase() || "U"}
-              </Text>
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={{ color: "#fff", fontSize: 24, fontWeight: "900", letterSpacing: -0.5 }} numberOfLines={2}>
-                {user?.name?.toUpperCase()}
-              </Text>
-              <Text style={{ color: "rgba(255,255,255,0.7)", fontFamily: "Courier", fontSize: 12, marginTop: 2 }}>
-                @{user?.username}
-              </Text>
-              <View style={{ flexDirection: "row", gap: 6, marginTop: 8 }}>
-                <View style={{ paddingHorizontal: 8, paddingVertical: 4, backgroundColor: isAdmin ? C.red : C.yellow, borderWidth: 2, borderColor: "#fff" }}>
-                  <Text style={{ fontSize: 10, fontWeight: "900", letterSpacing: 1, color: isAdmin ? "#fff" : C.text }}>
-                    {user?.role?.toUpperCase()}
-                  </Text>
-                </View>
-                {user?.sales_rep_code && (
-                  <View style={{ paddingHorizontal: 8, paddingVertical: 4, backgroundColor: "rgba(255,255,255,0.15)", borderWidth: 2, borderColor: "#fff" }}>
-                    <Text style={{ fontSize: 10, fontWeight: "900", letterSpacing: 1, color: "#fff" }}>
-                      {user.sales_rep_code}
-                    </Text>
-                  </View>
-                )}
+  return (
+    <SafeAreaView style={S.screen} edges={["top"]}>
+      <ScrollView contentContainerStyle={{ paddingBottom: 28 }}>
+        {/* Hero card */}
+        <View style={{ padding: 16 }}>
+          <View
+            style={{
+              borderRadius: 20,
+              overflow: "hidden",
+              backgroundColor: C.bgInk,
+              padding: 22,
+              gap: 14,
+            }}
+          >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 14 }}>
+              <View
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 18,
+                  backgroundColor: isAdmin ? C.red : C.primary,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  shadowColor: isAdmin ? C.red : C.primary,
+                  shadowOffset: { width: 0, height: 6 },
+                  shadowOpacity: 0.4,
+                  shadowRadius: 14,
+                }}
+              >
+                <Text style={{ color: "#fff", fontWeight: "800", fontSize: 28 }}>
+                  {user?.name?.[0]?.toUpperCase() || "U"}
+                </Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: "#fff", fontSize: 20, fontWeight: "800", letterSpacing: -0.3 }} numberOfLines={2}>
+                  {user?.name}
+                </Text>
+                <Text style={{ color: "rgba(255,255,255,0.65)", fontSize: 13, marginTop: 2 }}>
+                  @{user?.username}
+                </Text>
               </View>
             </View>
+            <View style={{ flexDirection: "row", gap: 6, flexWrap: "wrap" }}>
+              <Chip label={user?.role || ""} bg={isAdmin ? C.red : C.yellow} fg={isAdmin ? "#fff" : C.text} />
+              {user?.sales_rep_code && <Chip label={user.sales_rep_code} bg="rgba(255,255,255,0.15)" fg="#fff" />}
+              <Chip label="Active" bg="rgba(16,185,129,0.2)" fg={C.green} dot />
+            </View>
           </View>
-        </ImageBackground>
+        </View>
 
-        <View style={{ padding: 16, gap: 12 }}>
-          {/* Security capabilities */}
-          <View style={{ borderWidth: 2, borderColor: "#fff", backgroundColor: "#000", padding: 14, gap: 10 }}>
-            <Text style={{ color: C.yellow, fontSize: 11, fontWeight: "900", letterSpacing: 2, fontFamily: "Courier" }}>
-              ◢ SECURITY POLICY
-            </Text>
+        {/* Section: How it works */}
+        <View style={{ paddingHorizontal: 16, gap: 12 }}>
+          <Text style={{ fontSize: 14, fontWeight: "700", color: C.text, marginTop: 4 }}>How it keeps you safe</Text>
+
+          <View style={{ backgroundColor: C.surface, borderRadius: 16, borderWidth: 1, borderColor: C.borderSoft, overflow: "hidden" }}>
             {[
-              { icon: "navigate", label: "GPS proximity gate · 30m radius", color: C.green },
-              { icon: "shield-checkmark", label: "Mock-location detection blocks fake GPS", color: C.red },
-              { icon: "lock-closed", label: "Customer location set ONCE · admin-only reset", color: C.yellow },
-              { icon: "cloud-offline", label: "Offline queue · auto-sync on reconnect", color: C.primary },
-              { icon: "camera", label: "In-app camera only · gallery upload disabled", color: "#fff" },
-              { icon: "barcode", label: "Each photo watermarked with date/coord/user", color: "#fff" },
-            ].map((row, i) => (
-              <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                <View style={{ width: 26, height: 26, backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 2, borderColor: row.color, alignItems: "center", justifyContent: "center" }}>
-                  <Ionicons name={row.icon as any} size={14} color={row.color} />
+              { icon: "navigate", title: "30 m proximity gate", sub: "Photo capture only when you're at the store.", color: C.primary },
+              { icon: "shield-checkmark", title: "Anti-spoof", sub: "Mock GPS attempts are blocked and logged.", color: C.green },
+              { icon: "lock-closed", title: "Single location lock", sub: "Customer GPS is set once. Only admin can reset.", color: C.yellow, dark: true },
+              { icon: "cloud-offline", title: "Offline ready", sub: "Photos queue locally and auto-sync.", color: C.orange },
+              { icon: "barcode", title: "Photo watermark", sub: "Date · Coordinates · User · Customer code.", color: C.text },
+            ].map((row, i, arr) => (
+              <View
+                key={i}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 12,
+                  paddingHorizontal: 14,
+                  paddingVertical: 12,
+                  borderBottomWidth: i < arr.length - 1 ? 1 : 0,
+                  borderBottomColor: C.borderSoft,
+                }}
+              >
+                <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: C.bgSubtle, alignItems: "center", justifyContent: "center" }}>
+                  <Ionicons name={row.icon as any} size={18} color={row.dark ? "#92670B" : row.color} />
                 </View>
-                <Text style={{ color: "#fff", flex: 1, fontSize: 13, fontWeight: "500" }}>{row.label}</Text>
-                <Ionicons name="checkmark-sharp" size={16} color={C.green} />
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 14, fontWeight: "700", color: C.text }}>{row.title}</Text>
+                  <Text style={{ fontSize: 12, color: C.textSecondary, marginTop: 2 }}>{row.sub}</Text>
+                </View>
+                <Ionicons name="checkmark-circle" size={18} color={C.green} />
               </View>
             ))}
           </View>
 
-          {/* Build info */}
-          <View style={{ flexDirection: "row", gap: 8 }}>
-            <View style={{ flex: 1, padding: 10, backgroundColor: "#fff", borderWidth: 2, borderColor: "#fff" }}>
-              <Text style={{ fontSize: 9, fontWeight: "900", letterSpacing: 1.5, color: C.text }}>BUILD</Text>
-              <Text style={{ fontSize: 18, fontWeight: "900", color: C.text, marginTop: 4 }}>v1.0.0</Text>
-            </View>
-            <View style={{ flex: 1, padding: 10, backgroundColor: C.yellow, borderWidth: 2, borderColor: "#fff" }}>
-              <Text style={{ fontSize: 9, fontWeight: "900", letterSpacing: 1.5, color: C.text }}>RADIUS</Text>
-              <Text style={{ fontSize: 18, fontWeight: "900", color: C.text, marginTop: 4 }}>30 m</Text>
-            </View>
-            <View style={{ flex: 1, padding: 10, backgroundColor: C.primary, borderWidth: 2, borderColor: "#fff" }}>
-              <Text style={{ fontSize: 9, fontWeight: "900", letterSpacing: 1.5, color: "#fff" }}>REGION</Text>
-              <Text style={{ fontSize: 18, fontWeight: "900", color: "#fff", marginTop: 4 }}>BAKU</Text>
-            </View>
+          {/* Build info pills */}
+          <View style={{ flexDirection: "row", gap: 8, marginTop: 4 }}>
+            <Pill label="Version" value="1.0.0" />
+            <Pill label="Radius" value="30 m" />
+            <Pill label="Region" value="Baku" />
           </View>
 
           <TouchableOpacity
             testID="logout-btn"
-            onPress={async () => {
-              await logout();
-              router.replace("/login");
+            onPress={onLogout}
+            style={{
+              marginTop: 8,
+              minHeight: 54,
+              borderRadius: 14,
+              backgroundColor: C.surface,
+              borderWidth: 1,
+              borderColor: "#FECDD3",
+              alignItems: "center",
+              justifyContent: "center",
+              flexDirection: "row",
+              gap: 8,
             }}
-            style={{ backgroundColor: C.red, borderWidth: 2, borderColor: "#fff", padding: 16, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, marginTop: 6 }}
           >
-            <Ionicons name="log-out" size={20} color="#fff" />
-            <Text style={{ color: "#fff", fontWeight: "900", letterSpacing: 1.5, textTransform: "uppercase", fontSize: 14 }}>
-              Sign Out
-            </Text>
+            <Ionicons name="log-out-outline" size={20} color={C.red} />
+            <Text style={{ color: C.red, fontWeight: "700", fontSize: 15 }}>Sign out</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function Chip({ label, bg, fg, dot }: { label: string; bg: string; fg: string; dot?: boolean }) {
+  return (
+    <View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, backgroundColor: bg, flexDirection: "row", alignItems: "center", gap: 5 }}>
+      {dot && <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: fg }} />}
+      <Text style={{ color: fg, fontSize: 11, fontWeight: "700" }}>{label}</Text>
+    </View>
+  );
+}
+
+function Pill({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={{ flex: 1, padding: 12, borderRadius: 14, backgroundColor: C.surface, borderWidth: 1, borderColor: C.borderSoft }}>
+      <Text style={{ fontSize: 10, fontWeight: "700", color: C.textMuted, letterSpacing: 1, textTransform: "uppercase" }}>{label}</Text>
+      <Text style={{ fontSize: 17, fontWeight: "800", color: C.text, marginTop: 4 }}>{value}</Text>
+    </View>
   );
 }
