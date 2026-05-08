@@ -23,8 +23,39 @@
       "output": "static",
       "favicon": "./assets/images/favicon.png"
     },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#000"
+      },
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
+      ]
+    },
+    "ios": {
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Capture shelf photos at customer locations",
+        "NSLocationWhenInUseUsageDescription": "Verify you are within 30m of the customer"
+      }
+    },
     "plugins": [
       "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Capture shelf photos at customer locations"
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Verify you are within 30m of the customer"
+        }
+      ],
       [
         "expo-splash-screen",
         {

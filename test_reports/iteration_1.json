@@ -1,0 +1,48 @@
+{
+  "summary": "Backend-only testing for Merchandising Shelf Photo Control API. Created /app/backend/tests/test_merch_api.py covering auth, customer access control, location lock, photo upload (in-range/out-of-range/mocked/null-location), admin role gating, admin reset flow, ERP lookup, and customer status logic. 25/25 pytest tests passed (100%) against the public EXPO_PUBLIC_BACKEND_URL.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/photo/upload", "issue": "Endpoint accepts photo_base64 with no size validation; large payloads could bloat MongoDB. Consider a max length check or GridFS for production."},
+      {"endpoint": "GET /api/admin/photos", "issue": "Hard-coded limit(500) with no pagination parameters. Acceptable for MVP but will not scale."},
+      {"endpoint": "POST /api/customer/confirm-location", "issue": "Does not validate that the rep's submitted lat/lon is within any sensible bound (e.g., -90..90). Pydantic Field constraints would help."},
+      {"endpoint": "Server startup", "issue": "Uses deprecated @app.on_event('startup'/'shutdown'); should migrate to FastAPI lifespan context manager (warning only, not failing)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_merch_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Optional: add Pydantic Field constraints (latitude: ge=-90 le=90, longitude: ge=-180 le=180) on ConfirmLocationRequest and PhotoUploadRequest.",
+    "Optional: validate photo_base64 length / decodability on upload to avoid DB bloat.",
+    "Optional: migrate startup/shutdown handlers to FastAPI lifespan API.",
+    "Optional: add pagination to /api/admin/photos and /api/admin/visit-history."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 672 lines; still readable but approaching the 700 line guideline — consider splitting into routers (auth/customers/photos/admin).",
+    "MongoDB _id is properly excluded everywhere via projection {\"_id\": 0}.",
+    "JWT secret, Mongo URL, admin/rep credentials all read from env — no hardcoded secrets.",
+    "verify_password swallows all exceptions; acceptable for bcrypt format errors but could mask logic bugs — log a warning at minimum.",
+    "Username is lowercased on login but seed inserts already lower-case usernames — consistent.",
+    "Haversine implementation is correct.",
+    "Fake-GPS logging fires both for out-of-range and is_mocked=true and persists user/customer/reason as required."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_merch_api.py (new)",
+    "/app/test_reports/pytest/pytest_results.xml (new)",
+    "/app/test_reports/iteration_1.json (new)"
+  ],
+  "success_rate": {"backend": "100% (25/25)", "frontend": "not tested (backend-only request)"},
+  "seed_data_creation": "No new seed; relied on backend's own seed (admin, rep01, rep02, C001-C005). Tests reset C003/C004/C005 via admin endpoint to make assertions deterministic and re-confirm where needed.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Tests live in /app/backend/tests/test_merch_api.py and are idempotent (use admin reset between runs). BASE_URL is hardcoded to the public preview URL; update if EXPO_PUBLIC_BACKEND_URL changes. C001 stays locked at (40.37650, 49.83260); C002/C004 also locked. C003 and C005 are reset to unlocked/null during test run. Photo uploads accumulate on C001 each run (consider cleanup if growth becomes an issue).",
+  "rca_of_issue": "N/A — no failures. All 17 listed acceptance criteria from the review_request mapped to passing tests: login admin/rep, wrong password 401, /auth/me, by-user list (4 customers w/ status), 403 cross-rep, single customer fetch, confirm-location 200 + 409, photo upload within 30m, out-of-range 400 with fake_gps_logs entry, is_mocked 400 with fake_gps_logs entry, null-location 400, photo by-customer GET, admin endpoints 200/403 matrix, admin reset + re-confirm, ERP shaped JSON, status logic uploaded/not_visited."
+}
