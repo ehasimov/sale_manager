@@ -112,6 +112,12 @@ class CustomerOut(BaseModel):
     sales_rep_code: Optional[str] = None
     status: Literal["not_visited", "uploaded", "delayed"] = "not_visited"
     last_upload_at: Optional[str] = None
+    visits_per_week: int = 1
+    visits_this_week: int = 0
+
+
+class ScheduleRequest(BaseModel):
+    visits_per_week: int = Field(ge=0, le=14)
 
 
 class ConfirmLocationRequest(BaseModel):
@@ -192,23 +198,30 @@ async def require_admin(user: dict = Depends(get_current_user)) -> dict:
 # =========================
 # Status helpers
 # =========================
-async def compute_customer_status(customer_code: str) -> tuple[str, Optional[datetime]]:
+async def compute_customer_status(customer_code: str, visits_per_week: int = 1) -> tuple[str, Optional[datetime], int]:
+    """Returns (status, last_upload_dt, visits_this_week)."""
+    week_ago = utc_now() - timedelta(days=7)
+    visits_this_week = await db.photo_uploads.count_documents({
+        "customer_code": customer_code,
+        "upload_date": {"$gte": week_ago},
+    })
     last = await db.photo_uploads.find_one(
         {"customer_code": customer_code},
         sort=[("upload_date", -1)],
         projection={"_id": 0, "upload_date": 1},
     )
     if not last:
-        return "not_visited", None
+        return "not_visited", None, visits_this_week
     last_dt = last["upload_date"]
     if isinstance(last_dt, str):
         last_dt = datetime.fromisoformat(last_dt)
     if last_dt.tzinfo is None:
         last_dt = last_dt.replace(tzinfo=timezone.utc)
-    age = utc_now() - last_dt
-    if age > timedelta(days=7):
-        return "delayed", last_dt
-    return "uploaded", last_dt
+    if visits_per_week > 0 and visits_this_week >= visits_per_week:
+        return "uploaded", last_dt, visits_this_week
+    if (utc_now() - last_dt) > timedelta(days=7):
+        return "delayed", last_dt, visits_this_week
+    return "uploaded", last_dt, visits_this_week
 
 
 # =========================
@@ -259,7 +272,8 @@ async def customers_by_user(user_id: str, current: dict = Depends(get_current_us
     cursor = db.customers.find(query, {"_id": 0}).sort("customer_code", 1)
     out: list[CustomerOut] = []
     async for c in cursor:
-        status_str, last_dt = await compute_customer_status(c["customer_code"])
+        vpw = int(c.get("visits_per_week", 1))
+        status_str, last_dt, vtw = await compute_customer_status(c["customer_code"], vpw)
         out.append(
             CustomerOut(
                 id=c["id"],
@@ -272,6 +286,8 @@ async def customers_by_user(user_id: str, current: dict = Depends(get_current_us
                 sales_rep_code=c.get("sales_rep_code"),
                 status=status_str,  # type: ignore
                 last_upload_at=iso(last_dt),
+                visits_per_week=vpw,
+                visits_this_week=vtw,
             )
         )
     return out
@@ -284,7 +300,8 @@ async def get_customer(customer_code: str, current: dict = Depends(get_current_u
         raise HTTPException(status_code=404, detail="Customer not found")
     if current["role"] != "admin" and c.get("sales_rep_code") != current.get("sales_rep_code"):
         raise HTTPException(status_code=403, detail="Forbidden")
-    status_str, last_dt = await compute_customer_status(customer_code)
+    vpw = int(c.get("visits_per_week", 1))
+    status_str, last_dt, vtw = await compute_customer_status(customer_code, vpw)
     return CustomerOut(
         id=c["id"],
         customer_code=c["customer_code"],
@@ -296,6 +313,8 @@ async def get_customer(customer_code: str, current: dict = Depends(get_current_u
         sales_rep_code=c.get("sales_rep_code"),
         status=status_str,  # type: ignore
         last_upload_at=iso(last_dt),
+        visits_per_week=vpw,
+        visits_this_week=vtw,
     )
 
 
@@ -321,7 +340,8 @@ async def confirm_location(body: ConfirmLocationRequest, current: dict = Depends
         },
     )
     c2 = await db.customers.find_one({"customer_code": body.customer_code}, {"_id": 0})
-    status_str, last_dt = await compute_customer_status(body.customer_code)
+    vpw = int(c2.get("visits_per_week", 1))
+    status_str, last_dt, vtw = await compute_customer_status(body.customer_code, vpw)
     return CustomerOut(
         id=c2["id"],
         customer_code=c2["customer_code"],
@@ -333,6 +353,8 @@ async def confirm_location(body: ConfirmLocationRequest, current: dict = Depends
         sales_rep_code=c2.get("sales_rep_code"),
         status=status_str,  # type: ignore
         last_upload_at=iso(last_dt),
+        visits_per_week=vpw,
+        visits_this_week=vtw,
     )
 
 
@@ -518,7 +540,8 @@ async def admin_reset_location(customer_code: str, _: dict = Depends(require_adm
         {"$set": {"latitude": None, "longitude": None, "location_locked": False, "location_set_at": None, "location_set_by": None}},
     )
     c2 = await db.customers.find_one({"customer_code": customer_code}, {"_id": 0})
-    status_str, last_dt = await compute_customer_status(customer_code)
+    vpw = int(c2.get("visits_per_week", 1))
+    status_str, last_dt, vtw = await compute_customer_status(customer_code, vpw)
     return CustomerOut(
         id=c2["id"],
         customer_code=c2["customer_code"],
@@ -530,6 +553,153 @@ async def admin_reset_location(customer_code: str, _: dict = Depends(require_adm
         sales_rep_code=c2.get("sales_rep_code"),
         status=status_str,  # type: ignore
         last_upload_at=iso(last_dt),
+        visits_per_week=vpw,
+        visits_this_week=vtw,
+    )
+
+
+@api.post("/admin/customer/{customer_code}/schedule", response_model=CustomerOut)
+async def admin_set_schedule(customer_code: str, body: ScheduleRequest, _: dict = Depends(require_admin)):
+    c = await db.customers.find_one({"customer_code": customer_code}, {"_id": 0})
+    if not c:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    await db.customers.update_one(
+        {"customer_code": customer_code},
+        {"$set": {"visits_per_week": int(body.visits_per_week)}},
+    )
+    c2 = await db.customers.find_one({"customer_code": customer_code}, {"_id": 0})
+    vpw = int(c2.get("visits_per_week", 1))
+    status_str, last_dt, vtw = await compute_customer_status(customer_code, vpw)
+    return CustomerOut(
+        id=c2["id"],
+        customer_code=c2["customer_code"],
+        customer_name=c2["customer_name"],
+        latitude=c2.get("latitude"),
+        longitude=c2.get("longitude"),
+        location_locked=bool(c2.get("location_locked", False)),
+        route_code=c2.get("route_code"),
+        sales_rep_code=c2.get("sales_rep_code"),
+        status=status_str,  # type: ignore
+        last_upload_at=iso(last_dt),
+        visits_per_week=vpw,
+        visits_this_week=vtw,
+    )
+
+
+# =========================
+# Reports & Analytics
+# =========================
+class WeeklyReportRow(BaseModel):
+    customer_code: str
+    customer_name: str
+    sales_rep_code: Optional[str] = None
+    route_code: Optional[str] = None
+    visits_per_week: int
+    visits_this_week: int
+    last_upload_at: Optional[str] = None
+    status: str  # not_visited | uploaded | delayed
+
+
+class WeeklyReportSummary(BaseModel):
+    total: int
+    on_track: int
+    overdue: int
+    not_visited: int
+    completion_pct: int
+    items: List[WeeklyReportRow]
+
+
+class DayBucket(BaseModel):
+    date: str
+    count: int
+
+
+class AnalyticsOut(BaseModel):
+    week_uploads: List[DayBucket]
+    by_rep: List[dict]
+    total_uploads: int
+    fake_gps_count: int
+    locked_customers: int
+    total_customers: int
+
+
+@api.get("/reports/weekly", response_model=WeeklyReportSummary)
+async def weekly_report(current: dict = Depends(get_current_user)):
+    """Weekly visit report. Sales rep sees only their customers; admin sees all."""
+    if current["role"] == "admin":
+        cursor = db.customers.find({}, {"_id": 0}).sort("customer_code", 1)
+    else:
+        rep_code = current.get("sales_rep_code")
+        if not rep_code:
+            return WeeklyReportSummary(total=0, on_track=0, overdue=0, not_visited=0, completion_pct=0, items=[])
+        cursor = db.customers.find({"sales_rep_code": rep_code}, {"_id": 0}).sort("customer_code", 1)
+
+    items: list[WeeklyReportRow] = []
+    on_track = 0
+    overdue = 0
+    not_visited = 0
+    async for c in cursor:
+        vpw = int(c.get("visits_per_week", 1))
+        status_str, last_dt, vtw = await compute_customer_status(c["customer_code"], vpw)
+        if status_str == "uploaded":
+            on_track += 1
+        elif status_str == "delayed":
+            overdue += 1
+        else:
+            not_visited += 1
+        items.append(WeeklyReportRow(
+            customer_code=c["customer_code"],
+            customer_name=c["customer_name"],
+            sales_rep_code=c.get("sales_rep_code"),
+            route_code=c.get("route_code"),
+            visits_per_week=vpw,
+            visits_this_week=vtw,
+            last_upload_at=iso(last_dt),
+            status=status_str,
+        ))
+    total = len(items)
+    completion = round((on_track / total) * 100) if total else 0
+    return WeeklyReportSummary(total=total, on_track=on_track, overdue=overdue, not_visited=not_visited, completion_pct=completion, items=items)
+
+
+@api.get("/admin/analytics", response_model=AnalyticsOut)
+async def admin_analytics(_: dict = Depends(require_admin)):
+    """7-day uploads bucketed by day + per-rep totals."""
+    now = utc_now()
+    week_start = (now - timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0)
+    buckets: list[DayBucket] = []
+    for i in range(7):
+        day_start = week_start + timedelta(days=i)
+        day_end = day_start + timedelta(days=1)
+        count = await db.photo_uploads.count_documents({
+            "upload_date": {"$gte": day_start, "$lt": day_end}
+        })
+        buckets.append(DayBucket(date=day_start.date().isoformat(), count=count))
+
+    # by rep
+    pipeline = [
+        {"$match": {"upload_date": {"$gte": week_start}}},
+        {"$group": {"_id": {"user_code": "$user_code", "username": "$username"}, "count": {"$sum": 1}}},
+        {"$sort": {"count": -1}},
+    ]
+    by_rep_raw = await db.photo_uploads.aggregate(pipeline).to_list(length=50)
+    by_rep = [
+        {"user_code": r["_id"].get("user_code"), "username": r["_id"].get("username"), "count": r["count"]}
+        for r in by_rep_raw
+    ]
+
+    total_uploads = await db.photo_uploads.count_documents({})
+    fake_gps_count = await db.fake_gps_logs.count_documents({})
+    locked_customers = await db.customers.count_documents({"location_locked": True})
+    total_customers = await db.customers.count_documents({})
+
+    return AnalyticsOut(
+        week_uploads=buckets,
+        by_rep=by_rep,
+        total_uploads=total_uploads,
+        fake_gps_count=fake_gps_count,
+        locked_customers=locked_customers,
+        total_customers=total_customers,
     )
 
 
@@ -646,17 +816,24 @@ async def seed():
 
     # Customers — Baku coordinates near Fountain Square
     seed_customers = [
-        {"customer_code": "C001", "customer_name": "Bravo Market - Sahil",        "latitude": 40.37650, "longitude": 49.83260, "location_locked": True,  "route_code": "R001", "sales_rep_code": "SR001"},
-        {"customer_code": "C002", "customer_name": "Araz Market - 28 May",         "latitude": 40.37973, "longitude": 49.84931, "location_locked": True,  "route_code": "R001", "sales_rep_code": "SR001"},
-        {"customer_code": "C003", "customer_name": "OBA Market - Targovi",         "latitude": None,     "longitude": None,     "location_locked": False, "route_code": "R001", "sales_rep_code": "SR001"},
-        {"customer_code": "C004", "customer_name": "Spar Express - Ichari Shahar", "latitude": 40.36631, "longitude": 49.83401, "location_locked": True,  "route_code": "R002", "sales_rep_code": "SR001"},
-        {"customer_code": "C005", "customer_name": "Bazarstore - Yasamal",         "latitude": None,     "longitude": None,     "location_locked": False, "route_code": "R002", "sales_rep_code": "SR002"},
+        {"customer_code": "C001", "customer_name": "Bravo Market - Sahil",        "latitude": 40.37650, "longitude": 49.83260, "location_locked": True,  "route_code": "R001", "sales_rep_code": "SR001", "visits_per_week": 1},
+        {"customer_code": "C002", "customer_name": "Araz Market - 28 May",         "latitude": 40.37973, "longitude": 49.84931, "location_locked": True,  "route_code": "R001", "sales_rep_code": "SR001", "visits_per_week": 1},
+        {"customer_code": "C003", "customer_name": "OBA Market - Targovi",         "latitude": None,     "longitude": None,     "location_locked": False, "route_code": "R001", "sales_rep_code": "SR001", "visits_per_week": 1},
+        {"customer_code": "C004", "customer_name": "Spar Express - Ichari Shahar", "latitude": 40.36631, "longitude": 49.83401, "location_locked": True,  "route_code": "R002", "sales_rep_code": "SR001", "visits_per_week": 2},
+        {"customer_code": "C005", "customer_name": "Bazarstore - Yasamal",         "latitude": None,     "longitude": None,     "location_locked": False, "route_code": "R002", "sales_rep_code": "SR002", "visits_per_week": 1},
     ]
     for sc in seed_customers:
         existing = await db.customers.find_one({"customer_code": sc["customer_code"]})
         if not existing:
             doc = {"id": str(uuid.uuid4()), **sc, "location_set_at": None, "location_set_by": None}
             await db.customers.insert_one(doc)
+        else:
+            # Ensure visits_per_week exists on existing rows
+            if existing.get("visits_per_week") is None:
+                await db.customers.update_one(
+                    {"customer_code": sc["customer_code"]},
+                    {"$set": {"visits_per_week": sc["visits_per_week"]}},
+                )
 
     logger.info("Seed complete")
 

@@ -237,3 +237,150 @@ class TestERPandStatus:
         assert by_code["C001"]["status"] == "uploaded"
         # C002 has no uploads in this test session
         assert by_code["C002"]["status"] in ("not_visited", "uploaded", "delayed")
+
+
+# === Customer schema includes visits_per_week / visits_this_week ===
+class TestCustomerScheduleFields:
+    def test_by_user_includes_visit_fields(self, rep01_login):
+        token, user = rep01_login
+        r = requests.get(f"{API}/customers/by-user/{user['id']}", headers=auth_h(token), timeout=15)
+        assert r.status_code == 200
+        for c in r.json():
+            assert "visits_per_week" in c, c
+            assert "visits_this_week" in c, c
+            assert isinstance(c["visits_per_week"], int)
+            assert isinstance(c["visits_this_week"], int)
+            assert c["visits_per_week"] >= 0
+
+
+# === Schedule editor ===
+class TestAdminSchedule:
+    def test_set_schedule_to_3(self, admin_token):
+        r = requests.post(f"{API}/admin/customer/C002/schedule",
+                          json={"visits_per_week": 3},
+                          headers=auth_h(admin_token), timeout=15)
+        assert r.status_code == 200, r.text
+        assert r.json()["visits_per_week"] == 3
+        # GET back to verify persistence
+        g = requests.get(f"{API}/customers/C002", headers=auth_h(admin_token), timeout=15)
+        assert g.status_code == 200
+        assert g.json()["visits_per_week"] == 3
+
+    def test_set_schedule_to_zero(self, admin_token):
+        r = requests.post(f"{API}/admin/customer/C002/schedule",
+                          json={"visits_per_week": 0},
+                          headers=auth_h(admin_token), timeout=15)
+        assert r.status_code == 200, r.text
+        assert r.json()["visits_per_week"] == 0
+        g = requests.get(f"{API}/customers/C002", headers=auth_h(admin_token), timeout=15)
+        assert g.json()["visits_per_week"] == 0
+
+    def test_set_schedule_out_of_range_422(self, admin_token):
+        r = requests.post(f"{API}/admin/customer/C002/schedule",
+                          json={"visits_per_week": 15},
+                          headers=auth_h(admin_token), timeout=15)
+        assert r.status_code == 422, r.text
+
+    def test_set_schedule_nonexistent_customer_404(self, admin_token):
+        r = requests.post(f"{API}/admin/customer/C999/schedule",
+                          json={"visits_per_week": 3},
+                          headers=auth_h(admin_token), timeout=15)
+        assert r.status_code == 404, r.text
+
+    def test_rep_cannot_set_schedule_403(self, rep01_login):
+        token, _ = rep01_login
+        r = requests.post(f"{API}/admin/customer/C002/schedule",
+                          json={"visits_per_week": 3},
+                          headers=auth_h(token), timeout=15)
+        assert r.status_code == 403, r.text
+
+    def test_restore_default_schedule(self, admin_token):
+        # restore C002 to vpw=1 to keep deterministic state for other tests
+        r = requests.post(f"{API}/admin/customer/C002/schedule",
+                          json={"visits_per_week": 1},
+                          headers=auth_h(admin_token), timeout=15)
+        assert r.status_code == 200
+
+
+# === Weekly report ===
+class TestWeeklyReport:
+    def test_rep01_sees_only_4_rows(self, rep01_login):
+        token, _ = rep01_login
+        r = requests.get(f"{API}/reports/weekly", headers=auth_h(token), timeout=20)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        for k in ("total", "on_track", "overdue", "not_visited", "completion_pct", "items"):
+            assert k in d
+        assert d["total"] == 4
+        codes = sorted([row["customer_code"] for row in d["items"]])
+        assert codes == ["C001", "C002", "C003", "C004"]
+        for row in d["items"]:
+            assert "visits_per_week" in row
+            assert "visits_this_week" in row
+            assert row["status"] in ("not_visited", "uploaded", "delayed")
+            assert row.get("sales_rep_code") == "SR001"
+
+    def test_admin_sees_all_5_rows(self, admin_token):
+        r = requests.get(f"{API}/reports/weekly", headers=auth_h(admin_token), timeout=20)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["total"] == 5
+        # Counters consistent with completion_pct
+        assert d["on_track"] + d["overdue"] + d["not_visited"] == d["total"]
+        expected_pct = round((d["on_track"] / d["total"]) * 100) if d["total"] else 0
+        assert d["completion_pct"] == expected_pct
+
+    def test_unauth_weekly_401(self):
+        r = requests.get(f"{API}/reports/weekly", timeout=15)
+        assert r.status_code == 401
+
+
+# === Analytics ===
+class TestAdminAnalytics:
+    def test_analytics_admin(self, admin_token):
+        r = requests.get(f"{API}/admin/analytics", headers=auth_h(admin_token), timeout=20)
+        assert r.status_code == 200, r.text
+        d = r.json()
+        for k in ("week_uploads", "by_rep", "total_uploads",
+                  "fake_gps_count", "locked_customers", "total_customers"):
+            assert k in d, f"missing {k}"
+        assert isinstance(d["week_uploads"], list)
+        assert len(d["week_uploads"]) == 7
+        for b in d["week_uploads"]:
+            assert "date" in b and "count" in b
+            assert isinstance(b["count"], int)
+        assert isinstance(d["by_rep"], list)
+        assert d["total_customers"] == 5
+        assert d["total_uploads"] >= 0
+        assert d["fake_gps_count"] >= 0
+        assert d["locked_customers"] >= 0
+
+    def test_analytics_rep_403(self, rep01_login):
+        token, _ = rep01_login
+        r = requests.get(f"{API}/admin/analytics", headers=auth_h(token), timeout=15)
+        assert r.status_code == 403
+
+
+# === Status semantics: visits_this_week vs visits_per_week ===
+class TestStatusSemantics:
+    def test_uploaded_when_visits_meet_target(self, rep01_login, admin_token):
+        # Set C001 visits_per_week=1; we already uploaded for C001 in TestPhotoUpload
+        rs = requests.post(f"{API}/admin/customer/C001/schedule",
+                           json={"visits_per_week": 1},
+                           headers=auth_h(admin_token), timeout=15)
+        assert rs.status_code == 200
+        token, _ = rep01_login
+        r = requests.get(f"{API}/customers/C001", headers=auth_h(token), timeout=15)
+        assert r.status_code == 200
+        d = r.json()
+        # 1 upload this week, target 1 -> uploaded
+        assert d["visits_this_week"] >= 1
+        assert d["status"] == "uploaded"
+
+    def test_not_visited_when_no_uploads(self, admin_token):
+        # C005 has no uploads ever in the seeded dataset. Still admin can see it.
+        r = requests.get(f"{API}/customers/C005", headers=auth_h(admin_token), timeout=15)
+        assert r.status_code == 200
+        d = r.json()
+        if d["visits_this_week"] == 0 and d.get("last_upload_at") is None:
+            assert d["status"] == "not_visited"

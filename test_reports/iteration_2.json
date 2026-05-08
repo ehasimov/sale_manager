@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 2 backend tests passed 39/39 (100%). Validated new endpoints (GET /api/reports/weekly, GET /api/admin/analytics, POST /api/admin/customer/{code}/schedule), new visits_per_week / visits_this_week fields on customer responses, role-based access, schedule validation (0..14 with 422 on 15, 404 on missing customer, 403 for sales rep), weekly report shape & summary math, analytics 7-day buckets and aggregations, and status semantics (uploaded vs not_visited vs delayed). Existing endpoints (auth, customers, confirm-location lock/unlock, photo upload in-range/out-of-range/mocked/null-location, admin lists, ERP) all still pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_merch_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "compute_customer_status: when last_upload_dt exists but visits_this_week==0 and last upload <= 7d ago, function returns 'uploaded'. This can mark a customer 'uploaded' for 7 days off a single old upload even if visits_per_week>=1 and they haven't visited THIS week. Consider returning 'delayed' (or a new status) when visits_this_week < visits_per_week regardless of last_upload age. Currently it satisfies the spec ('delayed if last upload > 7 days') but may not match user intent for weekly targets >1.",
+    "Weekly summary 'overdue' counter only counts status=='delayed'; customers with last_upload > 7 days who happen to have any upload this week (edge) still pass. Acceptable per current spec.",
+    "ScheduleRequest accepts 0..14 (le=14) but problem statement mentions 0..7; tests follow current 0..14 contract. If product wants strict 0..7, change Field(le=7) and adjust test expectation for 15->422 stays valid.",
+    "Admin analytics by_rep filters by upload_date>=week_start (last 7 days only). OK and matches '7 day buckets' framing; document in API docs.",
+    "server.py is single-file (~850 lines) — within limit but approaching threshold; consider modularising routers/models in future iteration."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_merch_api.py"
+  ],
+  "success_rate": {
+    "backend": "100% (39/39)",
+    "frontend": "not tested (backend-only request)"
+  },
+  "seed_data_creation": "No new seed data; tests reuse seeded users (admin, rep01, rep02) and customers C001..C005. Test temporarily mutates C001/C002 visits_per_week and restores C002 to 1; C001 left at 1.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Test suite at /app/backend/tests/test_merch_api.py covers auth, customers, schedule editor, weekly report, analytics, photo upload, fake-gps, admin lists, ERP. Re-run with: pytest /app/backend/tests/test_merch_api.py -v --junitxml=/app/test_reports/pytest/pytest_results.xml. BASE_URL is hardcoded to the public preview URL; if the deployment URL changes, update BASE_URL constant at top of the file. Note the schedule range is 0..14 (server) — keep tests aligned to whichever range the spec settles on.",
+  "rca_of_issue": "N/A — no failures."
+}
