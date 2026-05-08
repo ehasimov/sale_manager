@@ -1,0 +1,120 @@
+{
+  "theme": "light",
+  "archetype": "Swiss & High-Contrast",
+  "design_philosophy": "Utilitarian, tactical, and highly functional. Built for field merchandisers working in varied lighting conditions (from dark aisles to bright sun). Eschews soft SaaS gradients for neo-brutalist sharp edges, 2px structural borders, and stark, unapologetic contrast.",
+  "typography": {
+    "font_family": {
+      "headings": "Chivo, sans-serif",
+      "body": "IBM Plex Sans, sans-serif",
+      "mono": "IBM Plex Mono, monospace"
+    },
+    "rules": {
+      "h1": "text-4xl sm:text-5xl font-black tracking-tighter uppercase",
+      "h2": "text-2xl sm:text-3xl font-bold tracking-tight",
+      "h3": "text-xl sm:text-2xl font-bold",
+      "h4": "text-lg sm:text-xl font-semibold",
+      "body": "text-base leading-relaxed font-medium",
+      "labels": "text-xs font-bold uppercase tracking-[0.15em]"
+    }
+  },
+  "colors": {
+    "background": {
+      "default": "#FFFFFF",
+      "subtle": "#F4F4F5",
+      "dark": "#0A0A0A"
+    },
+    "text": {
+      "primary": "#0A0A0A",
+      "secondary": "#52525B",
+      "inverse": "#FFFFFF"
+    },
+    "brand": {
+      "primary": "#0000FF",
+      "primary_hover": "#0000CC",
+      "accent_yellow": "#FFCC00",
+      "accent_red": "#FF3B30",
+      "accent_green": "#00C300"
+    },
+    "ui": {
+      "border": "#0A0A0A",
+      "input_bg": "#FFFFFF",
+      "disabled": "#D4D4D8"
+    }
+  },
+  "surfaces_and_shadows": {
+    "card": "bg-white border-2 border-black shadow-[4px_4px_0px_#0A0A0A] rounded-none",
+    "card_hover": "hover:-translate-y-1 hover:shadow-[6px_6px_0px_#0A0A0A] transition-transform duration-200",
+    "button_primary": "bg-blue-600 text-white border-2 border-black shadow-[4px_4px_0px_#0A0A0A] rounded-none font-bold uppercase tracking-wide",
+    "button_primary_active": "active:translate-y-1 active:translate-x-1 active:shadow-[0px_0px_0px_#0A0A0A]",
+    "button_secondary": "bg-yellow-400 text-black border-2 border-black shadow-[4px_4px_0px_#0A0A0A] rounded-none font-bold uppercase tracking-wide",
+    "input": "bg-white border-2 border-black rounded-none focus:ring-0 focus:outline-none focus:border-blue-600 p-4 font-medium",
+    "badge": "px-2 py-1 border-2 border-black text-xs font-bold uppercase"
+  },
+  "layout_and_spacing": {
+    "container": "w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8",
+    "grid_dashboard": "grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6",
+    "grid_bento": "grid grid-cols-1 md:grid-cols-8 lg:grid-cols-12 gap-6",
+    "spacing_scale": {
+      "section": "py-12 md:py-24",
+      "card_padding": "p-6 md:p-8"
+    }
+  },
+  "components": {
+    "camera_watermark": {
+      "style": "absolute bottom-4 left-4 right-4 bg-black/80 text-white p-3 border-2 border-white backdrop-blur-none",
+      "typography": "font-mono text-xs md:text-sm tracking-tight",
+      "layout": "flex flex-col gap-1"
+    },
+    "gps_status_indicator": {
+      "verified": "w-4 h-4 rounded-none bg-green-500 border-2 border-black",
+      "pending": "w-4 h-4 rounded-none bg-yellow-400 border-2 border-black",
+      "failed": "w-4 h-4 rounded-none bg-red-500 border-2 border-black animate-pulse"
+    },
+    "status_badges": {
+      "not_visited": "bg-zinc-200 text-black border-2 border-black",
+      "uploaded": "bg-green-400 text-black border-2 border-black",
+      "delayed": "bg-yellow-400 text-black border-2 border-black"
+    },
+    "offline_banner": {
+      "style": "bg-yellow-400 text-black font-bold uppercase text-xs p-2 text-center border-b-2 border-black flex items-center justify-center gap-2"
+    }
+  },
+  "media": {
+    "icons_library": "@phosphor-icons/react",
+    "images": {
+      "login_background": {
+        "url": "https://static.prod-images.emergentagent.com/jobs/f51896a8-a6ca-473b-a5cc-30b2f1c124ff/images/d32d4a12345cdb97ac40d54c4e7d2a0daa2f445876136ba0e00f878f3b28c662.png",
+        "description": "Minimalist Swiss design topographic map pattern. Use as a background for the login screen."
+      },
+      "sync_graphic": {
+        "url": "https://static.prod-images.emergentagent.com/jobs/f51896a8-a6ca-473b-a5cc-30b2f1c124ff/images/152767d12ca0c4b35e3b071ee0963dd7448af6b9069a148e0fcbf4505389b30d.png",
+        "description": "Abstract high-contrast utilitarian geometric shapes for sync/offline empty states."
+      },
+      "placeholders": {
+        "store_shelves": [
+          "https://images.unsplash.com/photo-1734772337649-79615ba2f176?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDR8MHwxfHNlYXJjaHw0fHxzdXBlcm1hcmtldCUyMHJldGFpbCUyMHNoZWxmfGVufDB8fHx8MTc3ODI0MDk3N3ww&ixlib=rb-4.1.0&q=85",
+          "https://images.unsplash.com/photo-1606824722920-4c652a70f348?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDR8MHwxfHNlYXJjaHwxfHxzdXBlcm1hcmtldCUyMHJldGFpbCUyMHNoZWxmfGVufDB8fHx8MTc3ODI0MDk3N3ww&ixlib=rb-4.1.0&q=85",
+          "https://images.unsplash.com/photo-1775210291382-ad3c5a50b9af?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDR8MHwxfHNlYXJjaHwzfHxzdXBlcm1hcmtldCUyMHJldGFpbCUyMHNoZWxmfGVufDB8fHx8MTc3ODI0MDk3N3ww&ixlib=rb-4.1.0&q=85"
+        ],
+        "avatars": [
+          "https://images.unsplash.com/photo-1576558656222-ba66febe3dec?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1ODR8MHwxfHNlYXJjaHw0fHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc3ODIzNjA3Mnww&ixlib=rb-4.1.0&q=85",
+          "https://images.unsplash.com/photo-1762522926157-bcc04bf0b10a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1ODR8MHwxfHNlYXJjaHwxfHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc3ODIzNjA3Mnww&ixlib=rb-4.1.0&q=85",
+          "https://images.unsplash.com/photo-1769636929388-99eff95d3bf1?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1ODR8MHwxfHNlYXJjaHwyfHxwcm9mZXNzaW9uYWwlMjBoZWFkc2hvdCUyMHBvcnRyYWl0fGVufDB8fHx8MTc3ODIzNjA3Mnww&ixlib=rb-4.1.0&q=85"
+        ]
+      }
+    }
+  },
+  "animations": {
+    "button_press": "transition-transform duration-75 active:scale-[0.98]",
+    "list_stagger": "framer-motion with staggerChildren: 0.1 for customer lists"
+  },
+  "instructions_to_main_agent": [
+    "Strictly follow the light theme, stark contrast neo-brutalist style.",
+    "Do NOT use transparent gradients or rounded-xl borders. Everything must feel like a hard, physical 'tactical' UI.",
+    "Borders are solid 2px black. Shadows are solid black dropshadows with no blur (e.g. shadow-[4px_4px_0px_#0A0A0A]).",
+    "Use Phosphor icons for clear, dense UI navigation.",
+    "The camera view watermark should be displayed in monospace text at the bottom overlay over the image.",
+    "Add 'data-testid' to all buttons and inputs (e.g., data-testid='login-button').",
+    "For the map, if using a web map library, use a high-contrast black-and-white map style."
+  ]
+}
