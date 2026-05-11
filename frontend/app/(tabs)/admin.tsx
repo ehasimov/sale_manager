@@ -27,6 +27,12 @@ type Photo = {
   distance: number;
   upload_date: string;
   photo_base64: string;
+  ai_score?: {
+    shelf_share_pct?: number;
+    quality?: string;
+    product_visibility?: string;
+    notes?: string;
+  } | null;
 };
 
 type FakeLog = {
@@ -212,12 +218,25 @@ export default function Admin() {
               <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
                 {photos.map((p) => (
                   <View key={p.id} testID={`admin-photo-${p.id}`} style={{ width: PHOTO_W, backgroundColor: C.surface, borderRadius: 14, borderWidth: 1, borderColor: C.borderSoft, overflow: "hidden" }}>
-                    <Image source={{ uri: `data:image/jpeg;base64,${p.photo_base64}` }} style={{ width: "100%", height: PHOTO_W }} resizeMode="cover" />
+                    <View style={{ position: "relative" }}>
+                      <Image source={{ uri: `data:image/jpeg;base64,${p.photo_base64}` }} style={{ width: "100%", height: PHOTO_W }} resizeMode="cover" />
+                      {p.ai_score && typeof p.ai_score.shelf_share_pct === "number" && (
+                        <View style={{ position: "absolute", top: 6, left: 6, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6, backgroundColor: "rgba(16,185,129,0.95)", flexDirection: "row", alignItems: "center", gap: 3 }}>
+                          <Ionicons name="sparkles" size={11} color="#fff" />
+                          <Text style={{ color: "#fff", fontSize: 11, fontWeight: "800" }}>{p.ai_score.shelf_share_pct}%</Text>
+                        </View>
+                      )}
+                    </View>
                     <View style={{ padding: 10, gap: 3 }}>
                       <Text style={{ fontSize: 13, fontWeight: "700", color: C.text }} numberOfLines={1}>
                         {p.customer_name || p.customer_code}
                       </Text>
                       <Text style={{ fontSize: 11, fontWeight: "600", color: C.green }}>● {p.distance.toFixed(1)} m · {p.username}</Text>
+                      {p.ai_score?.notes && (
+                        <Text style={{ fontSize: 10, color: C.textSecondary, fontStyle: "italic" }} numberOfLines={2}>
+                          “{p.ai_score.notes}”
+                        </Text>
+                      )}
                       <Text style={{ fontSize: 10, color: C.textMuted }}>
                         {new Date(p.upload_date).toLocaleDateString()} · {new Date(p.upload_date).toLocaleTimeString().slice(0, 5)}
                       </Text>

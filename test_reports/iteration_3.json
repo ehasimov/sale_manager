@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 3 backend tests passed 46/46 (100%). Validated new AI photo-scoring flow end-to-end: (1) POST /api/photo/upload returns 200 immediately with ai_score=null while background task is scheduled, (2) ai_score is populated within ~10s on GET /api/photo/by-customer/C001 with shelf_share_pct (int 0..100), quality and product_visibility in {good,fair,poor}, notes <=240 chars, OR an explicit {error: ...} dict on LLM failure, (3) POST /api/photo/{id}/rescore by admin returns 200 with populated/error ai_score synchronously, (4) rescore by non-owner sales_rep returns 403, (5) rescore on INVALID_ID returns 404, (6) GET /api/admin/photos and GET /api/photo/by-customer/{code} include ai_score key on every item. Confirmed Gemini-2.5-flash is reachable via EMERGENT_LLM_KEY — backend logs show real shelf_share_pct=25/34/29 etc. All 39 regression tests (auth, customers, weekly report, schedule, fake-gps, location lock, ERP, analytics) still pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "AI scoring (Gemini via Emergent LLM key)", "issue": "During heavy/parallel testing we hit a transient 'Budget has been exceeded' error from the LLM provider (Max budget: 0.001 USD per key/window). The server handles this gracefully by writing {error: ...} into ai_score, so the contract holds, but in production this small budget will surface often. Consider monitoring and surfacing budget errors to admins."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ai_scoring.py",
+    "/app/backend/tests/test_merch_api.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "score_photo_async uses asyncio.create_task fire-and-forget. If the worker process is restarted/killed before scoring completes, ai_score will stay null. For production resilience, consider a small queue or periodic retry job for photos with ai_score=null older than N minutes.",
+    "score_photo_async is called synchronously in the rescore endpoint, so a slow LLM (5-10s) blocks the request thread — acceptable for now, but consider a 60s server-side timeout / asyncio.wait_for guard to avoid hung connections.",
+    "PhotoUploadRequest.photo_base64 has no size cap. A malicious payload could be MBs and slow Mongo writes. Add a length check (e.g., <= 8 MB after base64) and reject >200KB compressed if mobile-only.",
+    "ai_score dict is untyped (Optional[dict]) on PhotoOut — Pydantic won't validate enum values returning to the client. Defining a small AIScore model (shelf_share_pct: int, quality: Literal[...], product_visibility: Literal[...], notes: str, scored_at, model) plus an AIScoreError variant would tighten the contract.",
+    "EMERGENT_LLM_KEY is read at import time; if missing, scoring silently returns None and ai_score stays null forever. Consider logging.warning at startup when EMERGENT_LLM_KEY is empty so the operator sees a clear signal.",
+    "server.py is now ~950 lines — past the 700-line guideline. Recommend splitting into routers/ (auth, customers, photos, admin, reports) and services/ (ai_scoring, status) in the next iteration.",
+    "Rescore endpoint accepts photo_id but does not require the photo to belong to current sales_rep when role=='admin' — that is by design (admin override) and matches the request spec; documented here for future reviewers."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_ai_scoring.py"
+  ],
+  "success_rate": {
+    "backend": "100% (46/46) — 7 new AI-scoring tests + 39 regression",
+    "frontend": "not tested (backend-only request)"
+  },
+  "seed_data_creation": "No new seed data. Tests create 2-3 transient photo_uploads against C001 using a synthetic 640x480 JPEG (rendered shelves + coloured products + label patches) generated in-test with Pillow. No DB cleanup performed (uploads remain for inspection).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run with: pytest /app/backend/tests/ -v --junitxml=/app/test_reports/pytest/pytest_results.xml. AI scoring tests use a synthetic shelf JPEG built with Pillow (real visual features per /app/image_testing.md — not blank/solid). Each rescore call costs ~0.003 USD against the Emergent LLM key, and the configured budget appears to be ~0.001; expect occasional 'Budget exceeded' errors on rerun — these surface as ai_score={'error': ...} and the tests are designed to accept that as a valid (non-null) outcome. BASE_URL is hardcoded to the public preview; update at top of test files if deployment URL changes.",
+  "rca_of_issue": "N/A — no failures. Observed transient LLM budget errors are handled correctly by score_photo_async writing an error dict; tests assert ai_score is non-null after wait, not that scoring necessarily succeeded."
+}

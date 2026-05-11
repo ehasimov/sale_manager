@@ -26,6 +26,8 @@ JWT_ALGORITHM = "HS256"
 JWT_SECRET = os.environ["JWT_SECRET"]
 GPS_RADIUS_METERS = float(os.environ.get("GPS_RADIUS_METERS", "30"))
 
+EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
+
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ["DB_NAME"]]
@@ -78,6 +80,71 @@ def iso(dt: Optional[datetime]) -> Optional[str]:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.isoformat()
+
+
+# =========================
+# AI photo scoring (Gemini vision via Emergent LLM key)
+# =========================
+async def score_photo_async(photo_id: str, photo_base64: str) -> None:
+    """Background task: ask Gemini to score the shelf photo and write result back to MongoDB."""
+    if not EMERGENT_LLM_KEY or not photo_base64:
+        return
+    try:
+        import json as _json
+        from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+
+        chat = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=f"score-{photo_id}",
+            system_message=(
+                "You are a retail-merchandising auditor. Analyse the SHELF photo and respond with "
+                "ONLY a compact JSON object on a single line. No prose, no markdown, no code fences. "
+                "Schema: {\"shelf_share_pct\": int 0-100, \"quality\": \"good|fair|poor\", "
+                "\"product_visibility\": \"good|fair|poor\", \"notes\": \"<=2 short sentences\"}."
+            ),
+        ).with_model("gemini", "gemini-2.5-flash")
+
+        message = UserMessage(
+            text=(
+                "Score this shelf photo. shelf_share_pct = estimated % of visible shelf occupied by our brand "
+                "(if not identifiable, treat dominant SKU as our brand). quality assesses focus, lighting, framing. "
+                "product_visibility assesses how clearly individual SKUs can be read. Return only the JSON."
+            ),
+            file_contents=[ImageContent(image_base64=photo_base64)],
+        )
+        response = await chat.send_message(message)
+        text = response.strip() if isinstance(response, str) else str(response).strip()
+        # Strip code fences if any
+        if text.startswith("```"):
+            text = text.strip("`")
+            if text.startswith("json"):
+                text = text[4:]
+        # Pick first {...} block
+        start = text.find("{")
+        end = text.rfind("}")
+        if start == -1 or end == -1:
+            raise ValueError("No JSON in response")
+        parsed = _json.loads(text[start : end + 1])
+        score = {
+            "shelf_share_pct": int(max(0, min(100, parsed.get("shelf_share_pct", 0)))),
+            "quality": str(parsed.get("quality", "fair")).lower(),
+            "product_visibility": str(parsed.get("product_visibility", "fair")).lower(),
+            "notes": str(parsed.get("notes", ""))[:240],
+            "scored_at": utc_now(),
+            "model": "gemini-2.5-flash",
+        }
+        # Normalise enums
+        for k in ("quality", "product_visibility"):
+            if score[k] not in ("good", "fair", "poor"):
+                score[k] = "fair"
+        await db.photo_uploads.update_one({"id": photo_id}, {"$set": {"ai_score": score}})
+        logger.info(f"AI scored photo {photo_id}: share={score['shelf_share_pct']}")
+    except Exception as e:
+        logger.warning(f"AI scoring failed for {photo_id}: {e}")
+        await db.photo_uploads.update_one(
+            {"id": photo_id},
+            {"$set": {"ai_score": {"error": str(e)[:160], "scored_at": utc_now()}}},
+        )
 
 
 # =========================
@@ -147,6 +214,7 @@ class PhotoOut(BaseModel):
     upload_date: str
     device_id: str
     photo_base64: str
+    ai_score: Optional[dict] = None
 
 
 class FakeGpsLogOut(BaseModel):
@@ -420,6 +488,11 @@ async def upload_photo(body: PhotoUploadRequest, current: dict = Depends(get_cur
         "device_id": body.device_id,
     }
     await db.photo_uploads.insert_one(photo_doc)
+
+    # Fire-and-forget AI scoring (don't block upload response)
+    import asyncio as _asyncio
+    _asyncio.create_task(score_photo_async(photo_id, body.photo_base64))
+
     return PhotoOut(
         id=photo_id,
         customer_code=body.customer_code,
@@ -432,6 +505,7 @@ async def upload_photo(body: PhotoUploadRequest, current: dict = Depends(get_cur
         upload_date=iso(now),
         device_id=body.device_id,
         photo_base64=body.photo_base64,
+        ai_score=None,
     )
 
 
@@ -457,6 +531,7 @@ async def photos_by_customer(customer_code: str, current: dict = Depends(get_cur
             upload_date=iso(p["upload_date"]),
             device_id=p.get("device_id", ""),
             photo_base64=p.get("photo_base64", ""),
+            ai_score=p.get("ai_score"),
         ))
     return out
 
@@ -464,6 +539,32 @@ async def photos_by_customer(customer_code: str, current: dict = Depends(get_cur
 # =========================
 # Admin Endpoints
 # =========================
+@api.post("/photo/{photo_id}/rescore", response_model=PhotoOut)
+async def photo_rescore(photo_id: str, current: dict = Depends(get_current_user)):
+    p = await db.photo_uploads.find_one({"id": photo_id}, {"_id": 0})
+    if not p:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    if current["role"] != "admin" and p.get("user_id") != current["id"]:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    await score_photo_async(photo_id, p.get("photo_base64", ""))
+    p2 = await db.photo_uploads.find_one({"id": photo_id}, {"_id": 0})
+    cust = await db.customers.find_one({"customer_code": p2["customer_code"]}, {"_id": 0, "customer_name": 1})
+    return PhotoOut(
+        id=p2["id"],
+        customer_code=p2["customer_code"],
+        customer_name=cust.get("customer_name") if cust else None,
+        user_code=p2.get("user_code", ""),
+        username=p2.get("username"),
+        latitude=p2["latitude"],
+        longitude=p2["longitude"],
+        distance=p2["distance"],
+        upload_date=iso(p2["upload_date"]),
+        device_id=p2.get("device_id", ""),
+        photo_base64=p2.get("photo_base64", ""),
+        ai_score=p2.get("ai_score"),
+    )
+
+
 @api.get("/admin/photos", response_model=List[PhotoOut])
 async def admin_all_photos(_: dict = Depends(require_admin)):
     cursor = db.photo_uploads.find({}, {"_id": 0}).sort("upload_date", -1).limit(500)
@@ -482,6 +583,7 @@ async def admin_all_photos(_: dict = Depends(require_admin)):
             upload_date=iso(p["upload_date"]),
             device_id=p.get("device_id", ""),
             photo_base64=p.get("photo_base64", ""),
+            ai_score=p.get("ai_score"),
         ))
     return out
 

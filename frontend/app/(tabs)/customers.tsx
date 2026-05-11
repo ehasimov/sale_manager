@@ -19,6 +19,7 @@ import { S, C, statusStyle, statusTextColor } from "../../src/theme";
 import { readQueue, syncQueue } from "../../src/offlineQueue";
 import { shelfFor } from "../../src/assets";
 import * as h from "../../src/haptics";
+import { scheduleVisitReminders } from "../../src/notifications";
 
 type Customer = {
   id: string;
@@ -64,6 +65,8 @@ export default function Customers() {
     try {
       const data = await api<Customer[]>(`/api/customers/by-user/${user.id}`, { token });
       setItems(data);
+      // Schedule local reminders for pending / late visits (no-op on web; throttled)
+      scheduleVisitReminders(data as any);
     } catch (e: any) {
       setError(e?.message || "Failed to load customers");
     } finally {
