@@ -7,6 +7,7 @@ load_dotenv(ROOT_DIR / ".env")
 import os
 import uuid
 import math
+import json
 import logging
 import bcrypt
 import jwt
@@ -14,6 +15,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Literal
 
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Depends, status
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
@@ -139,12 +141,109 @@ async def score_photo_async(photo_id: str, photo_base64: str) -> None:
                 score[k] = "fair"
         await db.photo_uploads.update_one({"id": photo_id}, {"$set": {"ai_score": score}})
         logger.info(f"AI scored photo {photo_id}: share={score['shelf_share_pct']}")
+        await generate_photo_feedback(photo_id, score)
     except Exception as e:
         logger.warning(f"AI scoring failed for {photo_id}: {e}")
         await db.photo_uploads.update_one(
             {"id": photo_id},
             {"$set": {"ai_score": {"error": str(e)[:160], "scored_at": utc_now()}}},
         )
+
+
+# =========================
+# Claude AI (text) — photo feedback, report summary, assistant chat
+# =========================
+CLAUDE_MODELS = {
+    "sonnet-5.5": "claude-sonnet-5-5",
+    "sonnet-5": "claude-sonnet-5",
+    "haiku-4.5": "claude-haiku-4-5-20251001",
+}
+DEFAULT_CLAUDE = "sonnet-5.5"
+
+LANG_RULE = "Always answer in Azerbaijani unless the user clearly writes in another language. Be concise, practical and friendly."
+
+FEEDBACK_SYSTEM = (
+    "You are a field-merchandising coach for sales representatives. You receive the AI vision score of a shelf photo "
+    "(shelf share %, photo quality, product visibility, notes). Write 2-3 short sentences: what is good, what to fix on the "
+    "shelf or in the photo, and one concrete next action. No headings, no bullet lists, no markdown. " + LANG_RULE
+)
+
+SUMMARY_SYSTEM = (
+    "You are a retail sales operations analyst. You receive this week's visit-compliance data for a merchandising team. "
+    "Write a compact executive summary for the manager with these sections in plain text (one short line each heading, no markdown #): "
+    "1) Ümumi vəziyyət (overall status with the key numbers) 2) Diqqət tələb edən müştərilər (overdue / never visited — name up to 6) "
+    "3) Nümayəndələr (who performs well, who is behind) 4) Risklər (fake GPS, unlocked locations, low shelf share) 5) Tövsiyələr (3 concrete actions). "
+    "Keep it under 220 words. " + LANG_RULE
+)
+
+CHAT_SYSTEM = (
+    "You are the in-app assistant of a merchandising / shelf-photo control app used by sales representatives and their managers. "
+    "Reps visit customer stores and upload shelf photos only when within 30 m of the store's GPS location; each customer has a weekly visit plan. "
+    "Use the live context below to answer questions about customers, visits, overdue stores, routes and AI shelf scores. "
+    "If something is not in the context, say so honestly. Keep answers short (max ~120 words) and use plain text only: no markdown, no ** bold, no tables. " + LANG_RULE
+)
+
+
+def resolve_claude_model(key: Optional[str]) -> tuple[str, str]:
+    k = key if key in CLAUDE_MODELS else DEFAULT_CLAUDE
+    return k, CLAUDE_MODELS[k]
+
+
+def make_claude_chat(session_id: str, system_message: str, model_key: Optional[str] = None, history: Optional[list[dict]] = None):
+    from emergentintegrations.llm.chat import LlmChat
+
+    _, model = resolve_claude_model(model_key)
+    initial = [{"role": "system", "content": system_message}] + (history or [])
+    return LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=session_id,
+        system_message=system_message,
+        initial_messages=initial,
+    ).with_model("anthropic", model)
+
+
+async def stream_claude(chat, text: str):
+    from emergentintegrations.llm.chat import UserMessage, TextDelta, StreamDone
+
+    async for ev in chat.stream_message(UserMessage(text=text)):
+        if isinstance(ev, TextDelta):
+            yield ev.content
+        elif isinstance(ev, StreamDone):
+            break
+
+
+def sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"}
+
+
+async def generate_photo_feedback(photo_id: str, score: dict) -> None:
+    """Runs after Gemini scoring (still in background): Claude writes a short coaching note for the rep."""
+    if not EMERGENT_LLM_KEY:
+        return
+    try:
+        p = await db.photo_uploads.find_one({"id": photo_id}, {"_id": 0, "customer_code": 1})
+        cust = await db.customers.find_one({"customer_code": p["customer_code"]}, {"_id": 0, "customer_name": 1}) if p else None
+        customer_name = cust.get("customer_name") if cust else p.get("customer_code") if p else "?"
+        model_key, model = resolve_claude_model(DEFAULT_CLAUDE)
+        chat = make_claude_chat(f"feedback-{photo_id}", FEEDBACK_SYSTEM, model_key)
+        prompt = (
+            f"Müştəri: {customer_name}. Rəf payı: {score.get('shelf_share_pct')}%. "
+            f"Şəkil keyfiyyəti: {score.get('quality')}. Məhsul görünürlüyü: {score.get('product_visibility')}. "
+            f"Vizual qeydlər: {score.get('notes') or '-'}"
+        )
+        text = ""
+        async for chunk in stream_claude(chat, prompt):
+            text += chunk
+        await db.photo_uploads.update_one(
+            {"id": photo_id},
+            {"$set": {"ai_feedback": {"text": text.strip()[:1200], "model": model, "created_at": utc_now()}}},
+        )
+        logger.info(f"Claude feedback written for photo {photo_id}")
+    except Exception as e:
+        logger.warning(f"Claude feedback failed for {photo_id}: {e}")
 
 
 # =========================
@@ -215,6 +314,7 @@ class PhotoOut(BaseModel):
     device_id: str
     photo_base64: str
     ai_score: Optional[dict] = None
+    ai_feedback: Optional[dict] = None
 
 
 class FakeGpsLogOut(BaseModel):
@@ -532,6 +632,7 @@ async def photos_by_customer(customer_code: str, current: dict = Depends(get_cur
             device_id=p.get("device_id", ""),
             photo_base64=p.get("photo_base64", ""),
             ai_score=p.get("ai_score"),
+            ai_feedback=p.get("ai_feedback"),
         ))
     return out
 
@@ -562,6 +663,7 @@ async def photo_rescore(photo_id: str, current: dict = Depends(get_current_user)
         device_id=p2.get("device_id", ""),
         photo_base64=p2.get("photo_base64", ""),
         ai_score=p2.get("ai_score"),
+        ai_feedback=p2.get("ai_feedback"),
     )
 
 
@@ -584,6 +686,7 @@ async def admin_all_photos(_: dict = Depends(require_admin)):
             device_id=p.get("device_id", ""),
             photo_base64=p.get("photo_base64", ""),
             ai_score=p.get("ai_score"),
+            ai_feedback=p.get("ai_feedback"),
         ))
     return out
 
@@ -841,6 +944,174 @@ async def erp_lookup(customer_code: str, _: dict = Depends(get_current_user)):
 @api.get("/")
 async def root():
     return {"app": "merchandising", "ok": True}
+
+
+# =========================
+# Claude AI endpoints
+# =========================
+class AiModelOut(BaseModel):
+    key: str
+    model: str
+    label: str
+
+
+class AiSummaryRequest(BaseModel):
+    model: Optional[str] = None
+
+
+class AiSummaryOut(BaseModel):
+    text: str
+    model: str
+    created_at: str
+
+
+class AiChatRequest(BaseModel):
+    message: str = Field(min_length=1, max_length=2000)
+    model: Optional[str] = None
+
+
+class AiChatMessageOut(BaseModel):
+    id: str
+    role: str  # user | assistant
+    content: str
+    model: Optional[str] = None
+    created_at: str
+
+
+AI_MODEL_LABELS = {"sonnet-5.5": "Claude Sonnet 5.5", "sonnet-5": "Claude Sonnet 5", "haiku-4.5": "Claude Haiku 4.5"}
+
+
+async def build_ai_context(current: dict) -> str:
+    """Compact live snapshot of the user's (or whole team's) week for Claude prompts."""
+    rep = await weekly_report(current)
+    lines = [
+        f"Bu həftə: cəmi {rep.total} müştəri, {rep.on_track} plan üzrə, {rep.overdue} gecikmiş, "
+        f"{rep.not_visited} ziyarət olunmayıb, tamamlanma {rep.completion_pct}%."
+    ]
+    lines.append("Müştərilər (kod | ad | nümayəndə | marşrut | ziyarət bu həftə/plan | status | son yükləmə):")
+    for it in rep.items[:60]:
+        lines.append(
+            f"- {it.customer_code} | {it.customer_name} | {it.sales_rep_code or '-'} | {it.route_code or '-'} | "
+            f"{it.visits_this_week}/{it.visits_per_week} | {it.status} | {it.last_upload_at[:10] if it.last_upload_at else 'heç vaxt'}"
+        )
+    if len(rep.items) > 60:
+        lines.append(f"... və daha {len(rep.items) - 60} müştəri.")
+
+    photo_filter: dict = {} if current["role"] == "admin" else {"user_id": current["id"]}
+    photo_filter["ai_score.shelf_share_pct"] = {"$exists": True}
+    cursor = db.photo_uploads.find(photo_filter, {"_id": 0, "customer_code": 1, "ai_score": 1, "upload_date": 1}).sort("upload_date", -1).limit(15)
+    scored = [s async for s in cursor]
+    if scored:
+        avg = round(sum(s["ai_score"]["shelf_share_pct"] for s in scored) / len(scored))
+        lines.append(f"Son {len(scored)} şəklin orta AI rəf payı: {avg}%. Detallar: " + "; ".join(
+            f"{s['customer_code']} {s['ai_score']['shelf_share_pct']}% ({s['ai_score'].get('quality')})" for s in scored
+        ))
+
+    if current["role"] == "admin":
+        an = await admin_analytics(current)
+        lines.append(
+            "Son 7 gün yükləmələr: " + ", ".join(f"{d.date}: {d.count}" for d in an.week_uploads)
+            + f". Cəmi yükləmə: {an.total_uploads}. Saxta GPS siqnalları: {an.fake_gps_count}. "
+            f"Kilidlənmiş lokasiya: {an.locked_customers}/{an.total_customers}."
+        )
+        if an.by_rep:
+            lines.append("Nümayəndə üzrə bu həftə: " + ", ".join(f"{r.get('username') or r.get('user_code')} = {r['count']}" for r in an.by_rep[:10]))
+    return "\n".join(lines)
+
+
+@api.get("/ai/models", response_model=List[AiModelOut])
+async def ai_models(_: dict = Depends(get_current_user)):
+    return [AiModelOut(key=k, model=v, label=AI_MODEL_LABELS[k]) for k, v in CLAUDE_MODELS.items()]
+
+
+@api.post("/ai/report-summary")
+async def ai_report_summary(body: AiSummaryRequest, current: dict = Depends(require_admin)):
+    """Admin: stream a Claude-written executive summary of this week's visit report (SSE)."""
+    if not EMERGENT_LLM_KEY:
+        raise HTTPException(status_code=503, detail="AI is not configured")
+    model_key, model = resolve_claude_model(body.model)
+    context = await build_ai_context(current)
+    chat = make_claude_chat(f"summary-{current['id']}-{uuid.uuid4().hex[:8]}", SUMMARY_SYSTEM, model_key)
+
+    async def gen():
+        full = ""
+        try:
+            yield sse("meta", {"model": model})
+            async for chunk in stream_claude(chat, "Həftəlik məlumat:\n" + context):
+                full += chunk
+                yield sse("delta", {"text": chunk})
+            now = utc_now()
+            await db.ai_summaries.insert_one({
+                "id": str(uuid.uuid4()), "user_id": current["id"], "text": full.strip(), "model": model, "created_at": now,
+            })
+            yield sse("done", {"model": model, "created_at": iso(now)})
+        except Exception as e:
+            logger.warning(f"Claude summary failed: {e}")
+            yield sse("error", {"message": str(e)[:200]})
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+
+@api.get("/ai/report-summary/latest", response_model=Optional[AiSummaryOut])
+async def ai_report_summary_latest(_: dict = Depends(require_admin)):
+    doc = await db.ai_summaries.find_one({}, {"_id": 0}, sort=[("created_at", -1)])
+    if not doc:
+        return None
+    return AiSummaryOut(text=doc["text"], model=doc["model"], created_at=iso(doc["created_at"]))
+
+
+@api.get("/ai/chat/history", response_model=List[AiChatMessageOut])
+async def ai_chat_history(current: dict = Depends(get_current_user)):
+    cursor = db.ai_chat_messages.find({"user_id": current["id"]}, {"_id": 0}).sort("created_at", -1).limit(60)
+    docs = [d async for d in cursor]
+    docs.reverse()
+    return [AiChatMessageOut(id=d["id"], role=d["role"], content=d["content"], model=d.get("model"), created_at=iso(d["created_at"])) for d in docs]
+
+
+@api.delete("/ai/chat/history")
+async def ai_chat_clear(current: dict = Depends(get_current_user)):
+    res = await db.ai_chat_messages.delete_many({"user_id": current["id"]})
+    return {"deleted": res.deleted_count}
+
+
+@api.post("/ai/chat")
+async def ai_chat(body: AiChatRequest, current: dict = Depends(get_current_user)):
+    """Assistant chat with live visit context. Streams Claude tokens as SSE; history persisted per user."""
+    if not EMERGENT_LLM_KEY:
+        raise HTTPException(status_code=503, detail="AI is not configured")
+    model_key, model = resolve_claude_model(body.model)
+
+    hist_cursor = db.ai_chat_messages.find({"user_id": current["id"]}, {"_id": 0, "role": 1, "content": 1}).sort("created_at", -1).limit(20)
+    history = [h async for h in hist_cursor]
+    history.reverse()
+
+    context = await build_ai_context(current)
+    who = f"İstifadəçi: {current.get('name') or current['username']} (rol: {current['role']}, kod: {current.get('sales_rep_code') or '-'})."
+    chat = make_claude_chat(f"chat-{current['id']}", f"{CHAT_SYSTEM}\n\n{who}\n\nCANLI KONTEKST:\n{context}", model_key, history)
+
+    now = utc_now()
+    await db.ai_chat_messages.insert_one({
+        "id": str(uuid.uuid4()), "user_id": current["id"], "role": "user", "content": body.message, "created_at": now,
+    })
+
+    async def gen():
+        full = ""
+        try:
+            yield sse("meta", {"model": model})
+            async for chunk in stream_claude(chat, body.message):
+                full += chunk
+                yield sse("delta", {"text": chunk})
+            msg_id = str(uuid.uuid4())
+            done_at = utc_now()
+            await db.ai_chat_messages.insert_one({
+                "id": msg_id, "user_id": current["id"], "role": "assistant", "content": full.strip(), "model": model, "created_at": done_at,
+            })
+            yield sse("done", {"id": msg_id, "model": model, "created_at": iso(done_at)})
+        except Exception as e:
+            logger.warning(f"Claude chat failed: {e}")
+            yield sse("error", {"message": str(e)[:200]})
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers=SSE_HEADERS)
 
 
 # =========================

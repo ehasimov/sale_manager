@@ -142,7 +142,7 @@ export default function Customers() {
       <FlatList
         data={filtered}
         keyExtractor={(it) => it.id}
-        contentContainerStyle={{ padding: 16, gap: 12 }}
+        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 84 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} />}
         ListHeaderComponent={
           <View style={{ gap: 14, marginBottom: 4 }}>
@@ -274,6 +274,32 @@ export default function Customers() {
           <CustomerCard item={item} index={index} onPress={() => { h.light(); router.push(`/customer/${item.customer_code}`); }} />
         )}
       />
+
+      {/* AI assistant FAB */}
+      <TouchableOpacity
+        testID="ask-ai-fab"
+        onPress={() => { h.light(); router.push("/assistant"); }}
+        style={{
+          position: "absolute",
+          right: 16,
+          bottom: 18,
+          minHeight: 50,
+          paddingHorizontal: 16,
+          borderRadius: 25,
+          backgroundColor: C.bgInk,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 8,
+          shadowColor: "#000",
+          shadowOpacity: 0.25,
+          shadowRadius: 10,
+          shadowOffset: { width: 0, height: 4 },
+          elevation: 6,
+        }}
+      >
+        <Ionicons name="sparkles" size={16} color={C.yellow} />
+        <Text style={{ color: C.textInverse, fontWeight: "800", fontSize: 14 }}>Ask AI</Text>
+      </TouchableOpacity>
     </SafeAreaView>
   );
 }

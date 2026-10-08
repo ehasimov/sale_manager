@@ -49,6 +49,7 @@ type Photo = {
     notes?: string;
     error?: string;
   } | null;
+  ai_feedback?: { text: string; model?: string } | null;
 };
 
 const RADIUS = 30;
@@ -520,6 +521,18 @@ export default function CustomerDetail() {
                         <Text style={{ fontSize: 10, color: C.textSecondary, fontWeight: "600" }}>
                           AI: {p.ai_score.quality} · {p.ai_score.product_visibility}
                         </Text>
+                      )}
+                      {p.ai_feedback?.text && (
+                        <TouchableOpacity
+                          testID={`feedback-${p.id}`}
+                          onPress={() => { h.light(); Alert.alert("Coach tip", p.ai_feedback!.text); }}
+                          style={{ marginTop: 4, padding: 6, borderRadius: 8, backgroundColor: C.yellowSoft, flexDirection: "row", gap: 4 }}
+                        >
+                          <Ionicons name="sparkles" size={10} color="#92670B" style={{ marginTop: 1 }} />
+                          <Text style={{ flex: 1, fontSize: 10, lineHeight: 14, color: "#92670B", fontWeight: "600" }} numberOfLines={3}>
+                            {p.ai_feedback.text}
+                          </Text>
+                        </TouchableOpacity>
                       )}
                     </View>
                   </View>

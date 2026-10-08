@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -10,11 +10,13 @@ import {
   Modal,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api, useAuth } from "../../src/auth";
 import { S, C, statusStyle, statusTextColor } from "../../src/theme";
 import * as h from "../../src/haptics";
+import { cleanAiText, streamSSE, useAiModel } from "../../src/ai";
+import { ModelPicker } from "../../src/ModelPicker";
 
 type WeeklyRow = {
   customer_code: string;
@@ -66,6 +68,10 @@ export default function Reports() {
   const [filter, setFilter] = useState<"all" | "uploaded" | "delayed" | "not_visited">("all");
   const [editing, setEditing] = useState<WeeklyRow | null>(null);
   const [savingSchedule, setSavingSchedule] = useState(false);
+  const [model, setModel] = useAiModel();
+  const [summary, setSummary] = useState<{ text: string; model?: string; created_at?: string } | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const generatingRef = useRef(false);
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -75,6 +81,8 @@ export default function Reports() {
       if (isAdmin) {
         const a = await api<Analytics>("/api/admin/analytics", { token });
         setAnalytics(a);
+        const s = await api<{ text: string; model: string; created_at: string } | null>("/api/ai/report-summary/latest", { token });
+        if (s?.text && !generatingRef.current) setSummary(s);
       }
     } catch (e: any) {
       Alert.alert("Couldn't load", e?.message || "Please try again");
@@ -83,6 +91,33 @@ export default function Reports() {
       setRefreshing(false);
     }
   }, [token, isAdmin]);
+
+  const generateSummary = async () => {
+    if (!token || generatingRef.current) return;
+    h.tap();
+    generatingRef.current = true;
+    setGenerating(true);
+    setSummary({ text: "" });
+    try {
+      await streamSSE(
+        "/api/ai/report-summary",
+        token,
+        { model },
+        {
+          onDelta: (t) => setSummary((prev) => ({ ...(prev || { text: "" }), text: (prev?.text || "") + t })),
+          onDone: (d) => setSummary((prev) => ({ text: prev?.text || "", model: d.model, created_at: d.created_at })),
+        }
+      );
+      h.success();
+    } catch (e: any) {
+      h.error();
+      setSummary(null);
+      Alert.alert("AI summary failed", e?.message || "Please try again");
+    } finally {
+      generatingRef.current = false;
+      setGenerating(false);
+    }
+  };
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -121,13 +156,23 @@ export default function Reports() {
         contentContainerStyle={{ padding: 16, paddingBottom: 28, gap: 16 }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.primary} />}
       >
-        <View>
-          <Text style={{ fontSize: 12, fontWeight: "700", color: C.textMuted, letterSpacing: 1.2, textTransform: "uppercase" }}>
-            This week
-          </Text>
-          <Text style={{ fontSize: 28, fontWeight: "800", color: C.text, letterSpacing: -0.8, marginTop: 2 }}>
-            Visit reports
-          </Text>
+        <View style={{ flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between" }}>
+          <View>
+            <Text style={{ fontSize: 12, fontWeight: "700", color: C.textMuted, letterSpacing: 1.2, textTransform: "uppercase" }}>
+              This week
+            </Text>
+            <Text style={{ fontSize: 28, fontWeight: "800", color: C.text, letterSpacing: -0.8, marginTop: 2 }}>
+              Visit reports
+            </Text>
+          </View>
+          <TouchableOpacity
+            testID="reports-ask-ai"
+            onPress={() => { h.light(); router.push("/assistant"); }}
+            style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, minHeight: 40, borderRadius: 20, backgroundColor: C.bgInk }}
+          >
+            <Ionicons name="sparkles" size={14} color={C.yellow} />
+            <Text style={{ color: C.textInverse, fontWeight: "800", fontSize: 13 }}>Ask AI</Text>
+          </TouchableOpacity>
         </View>
 
         {loading ? (
@@ -136,6 +181,41 @@ export default function Reports() {
           </View>
         ) : !report ? null : (
           <>
+            {/* AI executive summary (admin) */}
+            {isAdmin && (
+              <View testID="ai-summary-card" style={{ backgroundColor: C.bgDeep, borderRadius: 18, padding: 18, gap: 12 }}>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                  <View style={{ width: 34, height: 34, borderRadius: 17, backgroundColor: "rgba(255,255,255,0.1)", alignItems: "center", justifyContent: "center" }}>
+                    <Ionicons name="sparkles" size={16} color={C.yellow} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: C.textInverse, fontSize: 15, fontWeight: "800" }}>AI weekly summary</Text>
+                    <Text style={{ color: C.textOnDarkMuted, fontSize: 11, fontWeight: "600" }}>
+                      {summary?.created_at ? `Claude · ${new Date(summary.created_at).toLocaleDateString()} ${new Date(summary.created_at).toLocaleTimeString().slice(0, 5)}` : "Claude · not generated yet"}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    testID="generate-summary"
+                    onPress={generateSummary}
+                    disabled={generating}
+                    style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, minHeight: 36, borderRadius: 18, backgroundColor: generating ? "rgba(255,255,255,0.12)" : C.yellow }}
+                  >
+                    {generating ? <ActivityIndicator size="small" color={C.textInverse} /> : <Ionicons name={summary?.text ? "refresh" : "flash"} size={14} color={C.text} />}
+                    <Text style={{ color: generating ? C.textInverse : C.text, fontWeight: "800", fontSize: 12 }}>{generating ? "Writing…" : summary?.text ? "Refresh" : "Generate"}</Text>
+                  </TouchableOpacity>
+                </View>
+                <ModelPicker value={model} onChange={setModel} disabled={generating} dark />
+                {summary?.text ? (
+                  <Text testID="ai-summary-text" style={{ color: C.textInverse, fontSize: 14, lineHeight: 21, fontWeight: "500" }}>
+                    {cleanAiText(summary.text)}
+                  </Text>
+                ) : !generating ? (
+                  <Text style={{ color: C.textOnDarkMuted, fontSize: 13, lineHeight: 19 }}>
+                    Get a short executive read-out of this week: overdue stores, who is behind, risks and 3 recommended actions.
+                  </Text>
+                ) : null}
+              </View>
+            )}
             {/* Completion ring + summary */}
             <View style={{ backgroundColor: C.bgInk, borderRadius: 18, padding: 18, flexDirection: "row", alignItems: "center", gap: 18 }}>
               <CompletionRing pct={report.completion_pct} />

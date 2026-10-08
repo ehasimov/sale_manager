@@ -101,3 +101,7 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+## Iteration 4 — Claude AI integration (main agent notes)
+- Backend (server.py): new section "Claude AI" — GET /api/ai/models, POST /api/ai/report-summary (admin, SSE stream), GET /api/ai/report-summary/latest (admin), GET/DELETE /api/ai/chat/history, POST /api/ai/chat (SSE stream, per-user persisted history in ai_chat_messages). Models: sonnet-5.5 (claude-sonnet-5-5, default), sonnet-5, haiku-4.5. After Gemini scoring, Claude writes `ai_feedback` {text, model, created_at} on photo_uploads (returned in PhotoOut).
+- Frontend: /assistant chat screen (streaming bubbles, model picker, clear history), "Ask AI" FAB on Routes tab and button on Reports; admin "AI weekly summary" card on Reports (Generate/Refresh streams text, loads latest on open); coach-tip (ai_feedback) shown on photo cards in customer detail + admin photos.
+- Smoke-tested via screenshot: summary streaming + chat reply work on web preview.

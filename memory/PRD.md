@@ -66,3 +66,11 @@ Field-ops mobile suite with FastAPI + MongoDB backend. Sales reps capture shelf 
 - Background geofencing for proximity-triggered notifications (needs dev client)
 - AI score history & per-rep average shelf-share trend chart
 - Real ERP webhook ingestion
+
+## Claude AI integration (June 2026) — DONE, tested 58/58 backend + frontend flows
+- Models (Emergent LLM key): `sonnet-5.5` → claude-sonnet-5-5 (default), `sonnet-5`, `haiku-4.5`; user-selectable chips (persisted in AsyncStorage `merch.aiModel`).
+- Endpoints: `GET /api/ai/models`, `POST /api/ai/chat` (SSE), `GET/DELETE /api/ai/chat/history` (per-user, collection `ai_chat_messages`), `POST /api/ai/report-summary` (admin, SSE), `GET /api/ai/report-summary/latest` (collection `ai_summaries`).
+- Photo pipeline: Gemini score → Claude coaching note stored as `photo_uploads.ai_feedback {text, model, created_at}` (returned in PhotoOut).
+- UI: `/assistant` chat screen (streaming, model picker, clear), "Ask AI" FAB on Routes + button on Reports, admin "AI weekly summary" card on Reports, yellow coach-tip on photo cards (customer detail + admin).
+- Claude replies in Azerbaijani by default (follows user's language). Streaming via `expo/fetch` + SSE parser in `src/ai.ts`; keyboard via `react-native-keyboard-controller` (KeyboardProvider in root layout).
+- Backlog from code review: split server.py, Mongo indexes for AI collections, request timeout around Claude streams, cap chat history growth.

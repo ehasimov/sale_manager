@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 4: Fully validated the new Claude AI integration (admin weekly summary, assistant chat, ai_feedback field) end-to-end. Backend 58/58 (100%) — 19 new AI tests in /app/backend/tests/test_ai_claude.py + 39 regression tests in test_merch_api.py. Frontend 100% of listed flows verified on mobile viewport 390x844: admin login → Reports → ai-summary-card with 3 model chips (sonnet-5.5, sonnet-5, haiku-4.5) → tap generate-summary → button goes 'Writing…' then back to 'Refresh' while ai-summary-text streams Azerbaijani text (~980 chars) → header shows 'Claude · 10/8/2026 9:13'. Haiku chip selectable and Refresh works. reports-ask-ai navigates to /assistant. Chat SSE streams meta → delta* → done with proper event names and JSON. ai_chat_messages persist per-user — rep01 cannot see admin's messages (and vice-versa). After /assistant reload the previous messages re-appear (loaded from GET /api/ai/chat/history). rep01 ask-ai-fab on Routes tab navigates to /assistant, 3 Azerbaijani suggestion cards appear with rep-flavoured questions ('Bu həftə hansı müştərilərim gecikib?' etc.) and tapping one sends it, model label 'sonnet 5 5' / 'haiku 4 5' rendered under bubbles. Model fallback (bogus model → claude-sonnet-5-5), empty/too-long message validation (422), 401 without token, 403 for rep calling report-summary/latest — all confirmed. Regression: /api/auth/login, /api/reports/weekly, /api/admin/analytics unchanged. No deprecated expo packages or React Native issues detected in the new code.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_ai_claude.py",
+    "/app/backend/tests/test_merch_api.py",
+    "/app/backend/tests/test_ai_scoring.py",
+    "/app/test_reports/pytest/pytest_ai_claude.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now ~1222 lines (well past the 700-line guideline). Strongly recommend splitting into routers/ (auth, customers, photos, admin, reports, ai) and services/ (ai_chat, ai_summary, ai_feedback, scoring) in the next iteration — the AI block alone adds ~250 lines.",
+    "In /api/ai/chat the user message is inserted into Mongo BEFORE the SSE generator starts streaming, but the assistant placeholder is NOT persisted until stream completes. If the client disconnects mid-stream the user bubble remains in history with no assistant reply, which the UI handles gracefully (will show as the latest user msg) — acceptable, worth documenting.",
+    "/api/ai/report-summary saves on 'done' only — if streaming errors out mid-way, nothing is persisted but the client already saw partial deltas. Consider best-effort save of partial text with a flag like {status:'partial'} so admin can retry without losing context.",
+    "Chat history is capped at the 20 most recent messages when building prompt context (hist_cursor limit=20) — reasonable, but no system-level trim: a chatty user accumulates unbounded documents in ai_chat_messages. Consider either (a) hard cap per user via TTL/circular buffer or (b) delete oldest beyond, say, 200 messages.",
+    "AI_MODEL_LABELS and CLAUDE_MODELS are two parallel dicts keyed by the same strings — a single `MODELS = { key: {model, label} }` would be cleaner and avoid drift if someone adds a model to one but not the other.",
+    "stream_claude(chat, text) and the generator inside ai_chat have no per-request timeout — if Anthropic hangs, the SSE stream will too, holding a worker. Wrap with asyncio.wait_for(..., 60) around the inner loop or use emergentintegrations timeout kwarg if available.",
+    "/api/ai/report-summary is public to any admin but doesn't filter by admin_id for ai_report_summary_latest — the 'latest' is global across all admins. If multiple admins run summaries concurrently they overwrite each other's 'latest' view. Scope by current['id'] or document the intentional global behaviour.",
+    "ai_summaries collection has no index — a sort by created_at desc on each GET /latest is a full-collection scan. Add create_index('created_at') in seed(), same for ai_chat_messages.create_index([('user_id',1),('created_at',-1)])."
+  ],
+  "updated_files": ["/app/backend/tests/test_ai_claude.py"],
+  "success_rate": {
+    "backend": "100% (19/19 new AI tests + 39/39 regression = 58/58)",
+    "frontend": "100% of requested flows (admin summary stream, model chips, reports-ask-ai, ask-ai-fab, assistant input/send, msg-user/msg-assistant, suggestions, history persist across remount, clear button hidden on empty, send disabled while streaming)"
+  },
+  "seed_data_creation": "No new persistent seed data. Each run inserts a few ai_chat_messages and 1 ai_summaries doc per admin stream. test_history_persists_per_user_isolated explicitly clears rep01 history as part of its setup.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run with: pytest /app/backend/tests/ -v --junitxml=/app/test_reports/pytest/pytest_results.xml. test_ai_claude.py uses streaming SSE via requests.iter_lines; max_time=90s inside parse_sse covers slow Claude replies. haiku-4.5 is preferred in tests for speed (~2-5s), sonnet-5-5 default used only in the 'default-model' assertion test. If Emergent LLM key budget is exhausted, chat/summary tests will fail on 'done' event missing — rerun or top up the key. Frontend tests used Playwright at 390x844 against the public preview URL; selectors used: login-username-input / login-password-input / login-submit-btn, ai-summary-card, model-sonnet-5.5|sonnet-5|haiku-4.5, generate-summary, ai-summary-text, reports-ask-ai, ask-ai-fab, assistant-back/clear/input/send/suggestion, msg-user, msg-assistant.",
+  "rca_of_issue": "N/A — no failures. One observation: the assistant-clear trash icon only renders when messages.length > 0 (assistant.tsx:134). This is correct product behaviour; initial test attempts to click it on an empty rep01 history timed out until I pre-seeded a message. Document this in the test contract if next iteration touches the header."
+}

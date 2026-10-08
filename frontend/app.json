@@ -9,19 +9,12 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
-    },
-    "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#000"
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Capture shelf photos at customer locations",
+        "NSLocationWhenInUseUsageDescription": "Verify you are within 30m of the customer"
       },
-      "edgeToEdgeEnabled": true
-    },
-    "web": {
-      "bundler": "metro",
-      "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "bundleIdentifier": "com.emergent.gpsshelfupload.p8ehzj"
     },
     "android": {
       "adaptiveIcon": {
@@ -33,14 +26,13 @@
         "android.permission.CAMERA",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION"
-      ]
+      ],
+      "package": "com.emergent.gpsshelfupload.p8ehzj"
     },
-    "ios": {
-      "supportsTablet": true,
-      "infoPlist": {
-        "NSCameraUsageDescription": "Capture shelf photos at customer locations",
-        "NSLocationWhenInUseUsageDescription": "Verify you are within 30m of the customer"
-      }
+    "web": {
+      "bundler": "metro",
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
       "expo-router",

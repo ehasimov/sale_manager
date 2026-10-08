@@ -33,6 +33,7 @@ type Photo = {
     product_visibility?: string;
     notes?: string;
   } | null;
+  ai_feedback?: { text: string; model?: string } | null;
 };
 
 type FakeLog = {
@@ -236,6 +237,18 @@ export default function Admin() {
                         <Text style={{ fontSize: 10, color: C.textSecondary, fontStyle: "italic" }} numberOfLines={2}>
                           “{p.ai_score.notes}”
                         </Text>
+                      )}
+                      {p.ai_feedback?.text && (
+                        <TouchableOpacity
+                          testID={`admin-feedback-${p.id}`}
+                          onPress={() => { h.light(); Alert.alert("Claude coach tip", p.ai_feedback!.text); }}
+                          style={{ padding: 6, borderRadius: 8, backgroundColor: C.yellowSoft, flexDirection: "row", gap: 4 }}
+                        >
+                          <Ionicons name="sparkles" size={10} color="#92670B" style={{ marginTop: 1 }} />
+                          <Text style={{ flex: 1, fontSize: 10, lineHeight: 14, color: "#92670B", fontWeight: "600" }} numberOfLines={3}>
+                            {p.ai_feedback.text}
+                          </Text>
+                        </TouchableOpacity>
                       )}
                       <Text style={{ fontSize: 10, color: C.textMuted }}>
                         {new Date(p.upload_date).toLocaleDateString()} · {new Date(p.upload_date).toLocaleTimeString().slice(0, 5)}
